@@ -12,10 +12,9 @@ const FIREBASE_CONFIG = {
 };
 
 const CFG = {
-  trialDays: 10,                       // essai gratuit d'un salon
-  priceMonth: 2000,                    // F CFA par mois et par salon
-  priceYear: 20000,                    // F CFA par an
-  payNumber: "78 272 19 20",           // Wave et Orange Money
-  // Identifiants (uid Firebase) des comptes qui valident les paiements, affichés dans Salon > Mon compte
+  contact: "78 272 19 20",             // numéro de l'équipe de l'appli, affiché à un salon suspendu
+  // Comptes qui ouvrent l'espace admin (#admin) : identifiant affiché sur cette page, à copier ici
+  // et à la place de UID_ADMIN dans firestore.rules.
+  // Le paiement de l'abonnement se fait hors de l'appli ; l'espace admin sert à superviser et à suspendre un salon
   admins: [],
 };

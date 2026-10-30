@@ -1,1 +1,3 @@
 node_modules/
+regles-test.rules
+*.log

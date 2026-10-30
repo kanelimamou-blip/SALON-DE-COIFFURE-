@@ -269,3 +269,10 @@ body[data-route="ecran"] main{max-width:none;padding:0}
 a.dir{color:var(--ink);text-decoration:none}
 .open-tog.sm{min-height:30px;padding:4px 10px;font-size:.8rem}
 .small-qr{align-self:center}
+/* espace admin */
+.ad-row{display:flex;flex-direction:column;gap:8px}
+.ad-row .row{flex-wrap:wrap}
+.st{flex:none;padding:3px 10px;border-radius:999px;font-size:.8rem;font-weight:700;white-space:nowrap}
+.st-ok{background:var(--ok-soft);color:var(--ok)}.st-trial{background:var(--blue-soft);color:var(--blue)}
+.st-late{background:var(--warn-soft);color:var(--warn)}.st-neg{background:var(--accent-soft);color:var(--ko)}
+.sel{user-select:all;-webkit-user-select:all;overflow-wrap:anywhere}

@@ -5,6 +5,11 @@ const NM = __dirname + '/node_modules/firebase/';
 const U = 'http://localhost:8765/';
 let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHEC ') + label); if (!ok) fails++; };
 (async () => {
+  // compte admin créé d'avance dans l'émulateur, puis ajouté aux règles et à l'appli
+  const su = await (await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: `admin${Date.now()}@test.sn`, password: 'admin123', returnSecureToken: true }) })).json();
+  const ADMIN = { uid: su.localId, email: su.email };
+  fs.writeFileSync(__dirname + '/regles-test.rules', fs.readFileSync(__dirname + '/../firestore.rules', 'utf8').replace("['UID_ADMIN']", `['${ADMIN.uid}']`));
+  await new Promise((ok) => setTimeout(ok, 5000));   // l'émulateur recharge les règles
   const b = await chromium.launch();
   const errs = [];
   const phone = async (name) => {
@@ -12,8 +17,9 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
     await ctx.addInitScript(() => { window.SALON_EMU = true; });
     await ctx.route('https://www.gstatic.com/firebasejs/**', (r) => r.fulfill({ body: fs.readFileSync(NM + r.request().url().split('/').pop(), 'utf8'), contentType: 'text/javascript' }));
     await ctx.route('**/sw.js', (r) => r.fulfill({ status: 404, body: '' }));
+    await ctx.route('**/config.js', async (r) => r.fulfill({ body: fs.readFileSync(__dirname + '/../docs/config.js', 'utf8').replace('admins: []', `admins: ["${ADMIN.uid}"]`), contentType: 'text/javascript' }));
     const p = await ctx.newPage();
-    p.on('pageerror', (e) => errs.push(name + ': ' + e.message));
+    p.on('pageerror', (e) => { if (!/Erreur de test/.test(e.message)) errs.push(name + ': ' + e.message); });
     p.on('console', (m) => { if (m.type() === 'error' && !/favicon|fonts|404/.test(m.text())) errs.push(name + ' console: ' + m.text()); });
     return p;
   };
@@ -79,6 +85,29 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   await pat.goto(U + '#salon'); await W(pat, 2000); await pat.click('text=Informations et horaires'); await pat.check('#o-ann'); await W(pat, 1500);
   await cli.goto(U + '#annuaire'); await W(cli, 3000);
   check((await txt(cli, '#an-list')).includes('Salon Essai'), 'annuaire : le salon apparaît');
+
+  // 9. Espace admin : un patron ne peut pas lever une suspension, l'admin voit le salon, son activité, les erreurs, et le suspend
+  const self = await pat.evaluate(async (sid) => { try { await firebase.firestore().collection('salons').doc(sid).update({ blocked: false }); return 'accepté'; } catch (e) { return e.code; } }, sid);
+  check(self === 'permission-denied', 'patron : ne peut pas toucher à la suspension (' + self + ')');
+  await cli.evaluate(() => setTimeout(() => { throw new Error('Erreur de test e2e'); }));
+  await W(cli, 2500);
+  const adm = await phone('admin'); await adm.goto(U + '#admin'); await W(adm, 2500);
+  await adm.fill('#ad-mail', ADMIN.email); await adm.fill('#ad-pass', 'admin123'); await adm.click('#ad-em .btn'); await W(adm, 4000);
+  check((await txt(adm, '#ad-list')).includes('Salon Essai'), 'admin : voit le salon dans la liste');
+  check((await txt(adm, '#ad-kpi')).includes('salons inscrits'), 'admin : chiffres globaux affichés');
+  check((await txt(adm, `[data-sid="${sid}"]`)).includes('Actif'), 'admin : salon actif cette semaine');
+  check((await txt(adm, '#ad-err')).includes('Erreur de test e2e'), 'admin : erreur d\'un téléphone remontée');
+  const peek = await cli.evaluate(async () => { try { await firebase.firestore().collection('erreurs').get(); return 'accepté'; } catch (e) { return e.code; } });
+  check(peek === 'permission-denied', 'règles : un client ne lit pas les erreurs (' + peek + ')');
+  await adm.click(`[data-sid="${sid}"] [data-ad="block"]`); await W(adm, 2500);
+  check((await txt(adm, `[data-sid="${sid}"]`)).includes('Suspendu'), 'admin : salon suspendu');
+  const cli2 = await phone('client2'); await cli2.goto(U + '#ticket/' + sid); await W(cli2, 3000);
+  check((await txt(cli2, '#t-body')).includes("pas disponible"), 'client : salon suspendu, pas de ticket possible');
+  const forced = await cli2.evaluate(async (sid) => { try { const u = (await firebase.auth().signInAnonymously()).user; await firebase.firestore().collection('salons').doc(sid).collection('queue').add({ day: '2030-01-01', num: 1, name: 'X', status: 'attente', uid: u.uid }); return 'accepté'; } catch (e) { return e.code; } }, sid);
+  check(forced === 'permission-denied', 'règles : ticket refusé sur un salon suspendu (' + forced + ')');
+  await adm.click(`[data-sid="${sid}"] [data-ad="unblock"]`); await W(adm, 2000);
+  const notAdmin = await phone('pas-admin'); await notAdmin.goto(U + '#admin'); await W(notAdmin, 2500);
+  check((await txt(notAdmin, 'main')).includes('Connecte-toi'), 'espace admin fermé sans compte');
 
   console.log(errs.length ? 'Erreurs :\n' + errs.join('\n') : 'Aucune erreur de page');
   console.log(fails ? `${fails} ÉCHEC(S)` : 'TOUT EST BON');

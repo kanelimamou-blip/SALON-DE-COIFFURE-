@@ -2,8 +2,12 @@
   "name": "salon-tests",
   "private": true,
   "scripts": {
-    "emulateurs": "firebase emulators:start --only firestore,auth --project salon-coiffure-f0ee4",
+    "emulateurs": "cp ../firestore.rules regles-test.rules && firebase emulators:start --only firestore,auth --project salon-coiffure-f0ee4",
     "test": "node e2e.js"
   },
-  "devDependencies": { "firebase": "10.12.2", "firebase-tools": "13.29.1", "playwright": "1.47.2" }
+  "devDependencies": {
+    "firebase": "10.12.2",
+    "firebase-tools": "13.29.1",
+    "playwright": "1.47.2"
+  }
 }

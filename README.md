@@ -15,7 +15,7 @@ Faite sur le modèle de l'appli [Révision](https://github.com/kanelimamou-blip/
 - **Offres de fêtes**, **page du salon** à partager (prix, attente en direct, itinéraire, QR code), **annuaire des salons** avec « Près de moi », plusieurs salons par patron, **mode simple** pour les coiffeurs seuls ou ambulants.
 - **Coiffeurs** : chacun relie son téléphone avec le code du salon et le code coiffeur. Il voit ses coupes et sa part, pas la recette du salon.
 - **Les profils** : patron, coiffeur, client et écran d'attente, tous ouverts depuis l'accueil.
-- **Essai et abonnement** : 10 jours gratuits, puis 2 000 F par mois ou 20 000 F par an, payés par Wave ou Orange Money au 78 272 19 20. Le patron déclare son paiement dans l'appli et un admin le valide dans l'appli (Salon > Abonnement). Après l'essai, les règles Firestore bloquent la caisse, les dépenses et le stock d'un salon non abonné, même en contournant l'appli.
+- **Abonnement et supervision** : le paiement de l'abonnement se fait hors de l'appli (main à main, Wave, Orange Money). L'espace admin (`#admin`, réservé aux comptes listés dans `CFG.admins` et dans `firestore.rules`) montre tous les salons, leur activité des 7 derniers jours, les erreurs remontées par les téléphones, et permet de suspendre un salon. Un salon suspendu ne prend plus de tickets ni de rendez-vous et sa caisse est fermée, même en contournant l'appli.
 
 ## Fichiers
 

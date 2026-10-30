@@ -1,6 +1,6 @@
 rules_version = '2';
 // Règles à coller dans la console Firebase (Firestore > Règles) du projet de l'appli Salon.
-// Remplacer UID_ADMIN par l'identifiant affiché dans Salon > Ce téléphone, sur le compte qui valide les paiements.
+// Remplacer UID_ADMIN par l'identifiant affiché sur la page #admin de l'appli (compte du propriétaire de l'appli).
 service cloud.firestore {
   match /databases/{db}/documents {
     function signed() { return request.auth != null; }
@@ -10,18 +10,19 @@ service cloud.firestore {
     function staffDoc(sid) { return /databases/$(db)/documents/salons/$(sid)/staff/$(request.auth.uid); }
     function staff(sid) { return signed() && exists(staffDoc(sid)); }
     function team(sid) { return owner(sid) || staff(sid); }
-    // caisse et bilan ouverts pendant l'essai de 10 jours, puis seulement si l'abonnement est payé
-    function active(sid) { let s = salon(sid); return s.premiumUntil > request.time.toMillis() || s.created + duration.value(10, 'd') > request.time; }
+    // un salon suspendu par l'admin ne prend plus de tickets ni de rendez-vous, et sa caisse est fermée
+    function open(sid) { return salon(sid).get('blocked', false) != true; }
+    function active(sid) { return open(sid); }
 
     match /salons/{sid} {
       // la fiche du salon est publique : nom, coupes, prix, ouvert ou fermé
       allow read: if true;
       allow create: if signed() && request.auth.token.firebase.sign_in_provider != 'anonymous'
         && request.resource.data.owner == request.auth.uid
-        && request.resource.data.created == request.time && request.resource.data.premiumUntil == 0;
-      // le patron ne peut toucher ni à la date de création (essai) ni à l'abonnement
-      allow update: if (owner(sid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['owner', 'created', 'premiumUntil']))
-        || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['premiumUntil']));
+        && request.resource.data.created == request.time && !('blocked' in request.resource.data);
+      // le patron ne touche ni à la date de création, ni à la suspension : c'est l'admin
+      allow update: if (owner(sid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['owner', 'created', 'blocked']))
+        || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blocked']));
 
       match /private/{doc} { allow read, write: if owner(sid); }
       match /staff/{uid} {
@@ -33,7 +34,7 @@ service cloud.firestore {
       match /meta/counter { allow read, write: if signed(); }
       match /queue/{id} {
         allow read: if true;
-        allow create: if signed() && request.resource.data.uid == request.auth.uid
+        allow create: if signed() && open(sid) && request.resource.data.uid == request.auth.uid
           && request.resource.data.status == 'attente' && request.resource.data.name is string && request.resource.data.name.size() <= 30;
         allow update: if team(sid) || (signed() && resource.data.uid == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status == 'parti');
@@ -51,7 +52,7 @@ service cloud.firestore {
       // rendez-vous : les créneaux pris sont publics (prénom seulement), le client peut annuler ou reporter le sien
       match /rdv/{id} {
         allow read: if true;
-        allow create: if signed() && request.resource.data.uid == request.auth.uid && request.resource.data.status == 'confirme'
+        allow create: if signed() && open(sid) && request.resource.data.uid == request.auth.uid && request.resource.data.status == 'confirme'
           && request.resource.data.name is string && request.resource.data.name.size() <= 30;
         allow update: if team(sid) || (signed() && resource.data.uid == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'day', 'time']));
@@ -67,9 +68,11 @@ service cloud.firestore {
       match /galerie/{id} { allow read: if true; allow write: if owner(sid); }
     }
 
-    match /paiements/{id} {
-      allow create: if signed() && request.resource.data.uid == request.auth.uid && request.resource.data.status == 'attente';
-      allow read, update: if admin();
+    // erreurs remontées par les téléphones : chacun peut en envoyer, seul l'admin les lit
+    match /erreurs/{id} {
+      allow create: if signed() && request.resource.data.uid == request.auth.uid && request.resource.data.msg is string && request.resource.data.msg.size() <= 500;
+      allow read, delete: if admin();
     }
+
   }
 }

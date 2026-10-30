@@ -1,6 +1,6 @@
 # Tests de bout en bout
 
-Parcours complet (patron, client, coiffeur) sur les émulateurs Firebase, avec les vraies règles `../firestore.rules`. Rien n'est écrit dans le vrai projet.
+Parcours complet (patron, client, coiffeur) sur les émulateurs Firebase, avec les vraies règles `../firestore.rules` (copiées dans `regles-test.rules`, avec un compte admin de test). Rien n'est écrit dans le vrai projet.
 
 ```
 cd tests && npm install

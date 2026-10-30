@@ -1,14 +1,15 @@
 "use strict";
 // Données des salons, dans Firestore (cache sur le téléphone pour marcher sans connexion).
 //
-// salons/{sid}                      nom, quartier, services, coiffeurs, ouvert, owner, created, premiumUntil
+// salons/{sid}                      nom, quartier, services, coiffeurs, ouvert, owner, created, blocked (suspendu par l'admin)
 // salons/{sid}/private/config       code coiffeur (lisible par le patron seul)
 // salons/{sid}/staff/{uid}          coiffeur relié à ce téléphone
 // salons/{sid}/queue/{id}           tickets de la file (jour, numéro, prénom, coupe, statut)
 // salons/{sid}/contacts/{id}        numéro du client d'un ticket (patron et coiffeurs seulement)
 // salons/{sid}/ventes|depenses|stock|pointage|galerie/{id}
 // salons/{sid}/meta/counter         dernier numéro de ticket du jour
-// paiements/{id}                    « j'ai payé » d'un salon, validé par un admin
+// erreurs/{id}                     erreurs remontées par les téléphones (lues par l'admin seulement)
+// espace admin : lecture de tous les salons, blocked modifiable par les admins seulement
 
 const Store = (() => {
   const code = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (x) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[x % 32]).join("");
@@ -52,7 +53,7 @@ const Store = (() => {
     for (let i = 0; i < 5; i++) {
       const sid = code(5), ref = S(sid);
       if ((await ref.get().catch(() => null))?.exists) continue;
-      await ref.set({ ...data, owner: user.uid, created: FV.serverTimestamp(), premiumUntil: 0 });
+      await ref.set({ ...data, owner: user.uid, created: FV.serverTimestamp() });
       await ref.collection("private").doc("config").set({ staffCode: code(4) });
       return sid;
     }
@@ -110,16 +111,23 @@ const Store = (() => {
     await S(sid).collection("staff").doc(uid).set({ coiffeurId, code: codeIn });
   }
 
-  async function declarePayment(rec) {
-    await db.collection("paiements").add({ ...rec, uid: user.uid, at: FV.serverTimestamp(), status: "attente" });
+  // Espace admin : tous les salons, et l'activité récente d'un salon (tickets et rendez-vous, données publiques)
+  const watchAllSalons = (cb, err) => db.collection("salons").orderBy("created", "desc").onSnapshot((q) => cb(q.docs.map(fromDoc)), err || (() => cb([])));
+  async function activity(sid, since) {
+    const [q, r] = await Promise.all([S(sid).collection("queue").where("day", ">=", since).get(), S(sid).collection("rdv").where("day", ">=", since).get()]);
+    return { tickets: q.size, rdv: r.size, last: q.docs.map((d) => d.data().day).sort().pop() || "" };
   }
-  const watchPayments = (cb) => db.collection("paiements").where("status", "==", "attente").onSnapshot((s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), () => cb([]));
-  async function validatePayment(p, until) {
-    const b = db.batch();
-    b.update(S(p.sid), { premiumUntil: until });
-    b.update(db.collection("paiements").doc(p.id), { status: "valide" });
-    await b.commit();
+  // Erreurs vues sur les téléphones, pour que l'admin repère un problème avant qu'on le lui signale
+  let sent = 0;
+  async function logError(e) {
+    if (!db || sent >= 5) return;
+    sent++;
+    await ensureUser().catch(() => {});
+    if (!user) return;
+    await db.collection("erreurs").add({ ...e, at: Date.now(), uid: user.uid }).catch(() => {});
   }
+  const watchErrors = (since, cb, err) => db.collection("erreurs").where("at", ">=", since).orderBy("at", "desc").limit(100).onSnapshot((q) => cb(q.docs.map((d) => ({ id: d.id, ...d.data() }))), err || (() => cb([])));
+  const removeError = (id) => db.collection("erreurs").doc(id).delete();
 
   return {
     init, ensureUser, signIn, signInEmail, signOut, isAccount,
@@ -127,6 +135,6 @@ const Store = (() => {
     get email() { return user ? user.email || "" : ""; },
     createSalon, watchSalon, getSalon, updateSalon, mySalons, watchDirectory,
     watch, add, set, update, remove, getDoc, nextNumber,
-    staffCode, newStaffCode, joinStaff, declarePayment, watchPayments, validatePayment,
+    staffCode, newStaffCode, joinStaff, watchAllSalons, activity, logError, watchErrors, removeError,
   };
 })();

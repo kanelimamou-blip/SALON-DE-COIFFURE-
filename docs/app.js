@@ -79,10 +79,8 @@ const svcOf = (id) => services().find((s) => s.id === id) || { name: "Coupe", pr
 const coifOf = (id) => coiffeurs().find((c) => c.id === id);
 const isStaff = () => ME.role === "patron" || ME.role === "coiffeur";
 
-// ---------- Essai gratuit et abonnement du salon
-const trialLeft = (s) => Math.max(0, CFG.trialDays - Math.floor((Date.now() - (s.created || Date.now())) / 864e5));
-const isPaid = (s) => (s.premiumUntil || 0) > Date.now();
-const unlocked = (s) => !!s && (isPaid(s) || trialLeft(s) > 0);
+// ---------- Salon suspendu par l'équipe de l'appli (espace admin) : le paiement de l'abonnement se fait hors de l'appli
+const unlocked = (s) => !!s && !s.blocked;
 
 // ---------- Attente estimée (idée 8) : chaque coiffeur présent prend le suivant, selon la durée des coupes
 function present() {
@@ -168,7 +166,7 @@ let viewSubs = [];
 function refresh() { if (refreshFn) { const a = document.activeElement; if (a && /INPUT|SELECT|TEXTAREA/.test(a.tagName) && a.closest("[data-keep]")) return; refreshFn(); } }
 function go(h) { if (location.hash === "#" + h) render(); else location.hash = h; }
 const ROUTES = {};
-const STAFF_ROUTES = ["file", "rdv", "caisse", "bilan", "salon", "abonnement", "pointage", "clients", "offres"];
+const STAFF_ROUTES = ["file", "rdv", "caisse", "bilan", "salon", "pointage", "clients", "offres"];
 function render() {
   const [r, arg] = location.hash.slice(1).split("/");
   refreshFn = null; clearInterval(idle); idle = null;
@@ -178,7 +176,7 @@ function render() {
   releaseWake();
   let route = ROUTES[r] ? r : "accueil";
   if (STAFF_ROUTES.includes(route) && !(isStaff() && ME.sid)) route = "accueil";
-  if (["bilan", "salon", "abonnement", "clients", "offres"].includes(route) && ME.role !== "patron") route = "file";
+  if (["bilan", "salon", "clients", "offres"].includes(route) && ME.role !== "patron") route = "file";
   if (isStaff() && ME.sid) follow(ME.sid, ME.role);
   tabs(route);
   ROUTES[route](arg ? decodeURIComponent(arg) : "");
@@ -197,7 +195,7 @@ function tabs(route) {
   const keys = ME.role === "patron" ? (simple ? ["caisse", "bilan", "clients", "salon"] : ["file", "rdv", "caisse", "bilan", "salon"]) : ["file", "rdv", "caisse", "pointage"];
   const items = keys.map((k) => [k, k === "caisse" && ME.role === "coiffeur" ? "Mes coupes" : T[k][0], T[k][1]]);
   const low = ME.role === "patron" ? LIVE.stock.filter((s) => s.qty <= (s.min || 0)).length : 0;
-  nav.innerHTML = items.map(([h, l, d]) => `<a href="#${h}"${route === h || (h === "salon" && ["abonnement", "offres"].includes(route)) || (h === "clients" && route === "clients") ? ' aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span>${h === "salon" && low ? `<i class="badge">${low}</i>` : ""}</a>`).join("");
+  nav.innerHTML = items.map(([h, l, d]) => `<a href="#${h}"${route === h || (h === "salon" && route === "offres") || (h === "clients" && route === "clients") ? ' aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span>${h === "salon" && low ? `<i class="badge">${low}</i>` : ""}</a>`).join("");
 }
 
 // ---------- Accueil : choisir son rôle
@@ -254,8 +252,7 @@ ROUTES.demarrer = async () => {
       <label class="lbl" for="n-q">Quartier et ville</label><input class="field" id="n-q" maxlength="50" placeholder="Ex. Médina, Dakar">
       <label class="lbl" for="n-tel">Numéro WhatsApp du salon</label><input class="field" id="n-tel" inputmode="tel" maxlength="20" placeholder="Ex. 77 123 45 67">
       <label class="lbl" for="n-coif">Prénoms des coiffeurs (séparés par des virgules)</label><input class="field" id="n-coif" maxlength="120" placeholder="Ex. Modou, Ibou, Pape">
-      <button class="btn">Créer le salon</button>
-      <p class="small muted">10 jours gratuits, puis ${fcfa(CFG.priceMonth)} par mois ou ${fcfa(CFG.priceYear)} par an. Gratuit pour les clients.</p></form>`;
+      <button class="btn">Créer le salon</button></form>`;
   $$("[data-sid]").forEach((b) => (b.onclick = () => { Object.assign(ME, { role: "patron", sid: b.dataset.sid }); saveMe(); go("file"); }));
   $("#new").onsubmit = async (e) => {
     e.preventDefault();
@@ -379,11 +376,9 @@ function addVente(sv, coiffeurId, pay, ticketId) {
   return Store.add(ME.sid, "ventes", { day: dayOf(), at: Date.now(), serviceId: sv.id, name: sv.name, price: sv.price, coiffeurId: coiffeurId || null, pay, by: Store.uid, ticketId: ticketId || null });
 }
 
-// ---------- Écran verrouillé après l'essai
+// ---------- Écran d'un salon suspendu
 function locked(what) {
-  $view.innerHTML = `<h1>${esc(what)}</h1><div class="card lock"><p>L'essai gratuit de ${CFG.trialDays} jours est terminé. La file d'attente reste ouverte pour tes clients.</p>
-    <p>Pour retrouver ${ME.role === "patron" ? "la caisse et le bilan" : "la caisse"}, ${ME.role === "patron" ? "abonne le salon" : "demande au patron d'abonner le salon"} : ${fcfa(CFG.priceMonth)} par mois ou ${fcfa(CFG.priceYear)} par an.</p>
-    ${ME.role === "patron" ? `<a class="btn" href="#abonnement">M'abonner</a>` : ""}</div>`;
+  $view.innerHTML = `<h1>${esc(what)}</h1><div class="card lock"><p>Ce salon est suspendu. Contacte l'équipe de l'appli au ${CFG.contact}.</p></div>`;
 }
 
 // ---------- Caisse (idées 11, 12, 13)
@@ -526,7 +521,7 @@ ROUTES.salon = () => {
     const s = LIVE.salon; if (!s) return;
     if (!built) {
       built = true;
-      $view.innerHTML = `<div id="s-root" class="stack-l"><h1>Salon</h1><div id="s-sub"></div>
+      $view.innerHTML = `<div id="s-root" class="stack-l"><h1>Salon</h1>
         <div class="quick"><a class="btn alt" href="#clients">Mes clients</a><a class="btn alt" href="#offres">Offres de fêtes</a><a class="btn alt" href="#page/${esc(ME.sid)}">Page du salon</a><a class="btn alt" href="#demarrer">Mes salons</a></div>
         <details class="card" open><summary><h2>QR code et écran d'attente</h2></summary><div id="s-qr"></div></details>
         <details class="card"><summary><h2>Coupes et prix</h2></summary><div id="s-svc" class="list"></div><button class="btn alt" type="button" id="svc-add">Ajouter une coupe</button></details>
@@ -570,9 +565,6 @@ ROUTES.salon = () => {
     fi("#o-dom-x", String(s.domicileExtra || 1000)); fi("#o-acc", String(s.acompte || 2000));
     $("#o-ann").checked = !!s.annuaire; $("#o-dom").checked = !!s.domicile; $("#o-simple").checked = !!s.simple;
     $("#o-pos-st").textContent = s.lat ? `Position enregistrée (${s.lat}, ${s.lng})` : "Pas encore de position";
-    const left = trialLeft(s);
-    $("#s-sub").innerHTML = isPaid(s) ? `<a class="banner ok" href="#abonnement">Abonnement actif jusqu'au ${new Date(s.premiumUntil).toLocaleDateString("fr-FR")}</a>`
-      : `<a class="banner" href="#abonnement"><span>${left > 0 ? `Essai gratuit : encore <b>${left} jour${left > 1 ? "s" : ""}</b>` : "Essai terminé : abonne le salon pour la caisse et le bilan"}</span><span>S'abonner →</span></a>`;
     if (!$("#s-qr").dataset.done) {
       $("#s-qr").dataset.done = 1;
       $("#s-qr").innerHTML = `<div class="qr-box"><div class="qr-print" id="qr-print"><b>${esc(s.name)}</b>${qrSvg(ticketUrl(ME.sid), 200)}<span>Scanne pour prendre ta place</span><span class="code">${esc(ME.sid)}</span></div>
@@ -653,51 +645,6 @@ function downloadPoster(s) {
   const a = document.createElement("a"); a.download = `affiche-${ME.sid}.png`; a.href = c.toDataURL("image/png"); a.click();
 }
 
-// ---------- Abonnement : paiement Wave ou Orange Money, validé dans l'appli
-ROUTES.abonnement = () => {
-  if (ME.role !== "patron") return go("file");
-  let plan = "mois", pay = "wave", built = false;
-  refreshFn = () => {
-    const s = LIVE.salon; if (!s) return;
-    if (!built) {
-      built = true;
-      $view.innerHTML = `<h1>Abonnement du salon</h1><div id="ab-st"></div>
-        <div class="card"><h2>1. Choisis ta formule</h2><div class="chips" id="ab-plan"><button class="chip" type="button" data-v="mois">${fcfa(CFG.priceMonth)} par mois</button><button class="chip" type="button" data-v="an">${fcfa(CFG.priceYear)} par an (2 mois offerts)</button></div></div>
-        <div class="card"><h2>2. Paie</h2><div class="chips" id="ab-pay"><button class="chip pay-wave" type="button" data-v="wave">Wave</button><button class="chip pay-om" type="button" data-v="om">Orange Money</button></div><p id="ab-how"></p></div>
-        <form class="card" id="ab-f" data-keep><h2>3. Préviens-nous</h2><label class="lbl" for="ab-tel">Numéro qui a payé</label><input class="field" id="ab-tel" inputmode="tel" maxlength="20" required placeholder="Ex. 77 123 45 67">
-          <button class="btn">J'ai payé</button><p class="small muted">On vérifie le paiement et l'abonnement s'active ici, en général dans la journée.</p><p class="small" id="ab-msg"></p></form>
-        <div id="ab-admin"></div>`;
-      $("#ab-plan").onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) { plan = b.dataset.v; refresh(); } };
-      $("#ab-pay").onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) { pay = b.dataset.v; refresh(); } };
-      $("#ab-f").onsubmit = async (e) => {
-        e.preventDefault();
-        await Store.declarePayment({ sid: ME.sid, salon: s.name, plan, pay, amount: plan === "an" ? CFG.priceYear : CFG.priceMonth, tel: $("#ab-tel").value.trim() }).then(
-          () => { $("#ab-msg").className = "small msg-ok"; $("#ab-msg").textContent = "Merci ! On vérifie ton paiement."; },
-          () => { $("#ab-msg").className = "small msg-ko"; $("#ab-msg").textContent = "Envoi impossible. Vérifie le réseau."; });
-      };
-      if (CFG.admins.includes(Store.uid)) adminPanel($("#ab-admin"));
-    }
-    const left = trialLeft(s);
-    $("#ab-st").innerHTML = isPaid(s) ? `<div class="banner ok">Abonnement actif jusqu'au ${new Date(s.premiumUntil).toLocaleDateString("fr-FR")}.</div>` : `<div class="banner">${left > 0 ? `Essai gratuit : encore ${left} jour${left > 1 ? "s" : ""} avec tout débloqué.` : "Essai gratuit terminé."}</div>`;
-    $$("#ab-plan [data-v]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === plan));
-    $$("#ab-pay [data-v]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === pay));
-    const amt = fcfa(plan === "an" ? CFG.priceYear : CFG.priceMonth);
-    $("#ab-how").innerHTML = pay === "wave" ? `Dans l'appli Wave, envoie <b>${amt}</b> au <b class="code">${CFG.payNumber}</b>.` : `Compose <b>#144#</b> (ou l'appli Orange Money) et envoie <b>${amt}</b> au <b class="code">${CFG.payNumber}</b>.`;
-  };
-  refresh();
-};
-// Pour l'équipe de l'appli : valider les paiements déclarés
-function adminPanel(el) {
-  Store.watchPayments((rows) => {
-    el.innerHTML = `<div class="card"><h2>Paiements à valider</h2>${rows.length ? rows.map((p) => `<div class="v-item"><div class="q-main"><b>${esc(p.salon)} · ${fcfa(p.amount)}</b><span class="small muted">${PAY[p.pay]} depuis ${esc(p.tel)} · ${p.plan === "an" ? "1 an" : "1 mois"}</span></div><button class="btn sm" type="button" data-ok="${esc(p.id)}">Valider</button></div>`).join("") : `<p class="empty">Rien à valider.</p>`}</div>`;
-    $$("[data-ok]", el).forEach((b) => (b.onclick = async () => {
-      const p = rows.find((x) => x.id === b.dataset.ok), cur = (await Store.getSalon(p.sid)) || {};
-      const from = Math.max(Date.now(), cur.premiumUntil || 0);
-      await Store.validatePayment(p, from + (p.plan === "an" ? 365 : 31) * 864e5); toast("Abonnement activé");
-    }));
-  });
-}
-
 // ---------- Page client : prendre son ticket et suivre son tour (idées 1, 2, 3, 7, 10)
 ROUTES.ticket = (sid) => {
   sid = (sid || "").toUpperCase();
@@ -736,7 +683,7 @@ ROUTES.ticket = (sid) => {
       const svs = services();
       if (!choice.svc && svs[0]) choice.svc = svs[0].id;
       $("#t-body").innerHTML = head + (me && me.status === "fini" ? `<div class="banner ok">${t("Merci et à bientôt !")}</div>` : "") +
-        (!s.open ? `<div class="banner">${t("Salon fermé pour le moment")}</div>` : `
+        (s.blocked ? `<div class="banner">Ce salon n'est pas disponible dans l'appli pour le moment.</div>` : !s.open ? `<div class="banner">${t("Salon fermé pour le moment")}</div>` : `
         <div class="kpis"><div><b>${w.length}</b><span>${t("en attente")}</span></div><div><b>${waitLabel(last)}</b><span>${t("Attente estimée")}</span></div></div>
         ${offersHtml(s)}
         <a class="btn alt" href="#reserver/${esc(sid)}">Prendre rendez-vous à une heure fixe</a>
@@ -863,6 +810,11 @@ let installEvt = null;
 window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; $("#install").hidden = false; });
 $("#install").onclick = async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; $("#install").hidden = true; };
 // Le serveur a refusé une écriture : le dire au lieu de faire croire que c'est enregistré
+// Erreurs envoyées à l'espace admin (message, écran, salon, rôle, téléphone)
+const report = (msg, extra) => Store.logError({ msg: String(msg || "?").slice(0, 500), route: location.hash.slice(0, 60), sid: ME.sid || "", role: ME.role || "", ua: navigator.userAgent.slice(0, 160), ...extra });
+window.addEventListener("error", (e) => report(e.message + (e.filename ? ` (${e.filename.split("/").pop()}:${e.lineno})` : "")));
+window.addEventListener("unhandledrejection", (e) => { const r = e.reason || {}; if (!/permission-denied/.test(r.code || "")) report(r.message || r, { code: r.code || "" }); });
+window.addEventListener("store-refused", (e) => report("Écriture refusée", { code: (e.detail && e.detail.code) || "" }));
 window.addEventListener("store-refused", (e) => toast(/permission/i.test(e.detail && e.detail.code || "") ? "Refusé par le serveur : cette action n'est pas autorisée." : "Enregistrement impossible. Réessaie."));
 const net = () => { $("#offline").hidden = navigator.onLine; };
 window.addEventListener("online", net); window.addEventListener("offline", net);
