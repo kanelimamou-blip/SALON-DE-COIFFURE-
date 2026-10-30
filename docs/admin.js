@@ -39,7 +39,7 @@ ROUTES.admin = () => {
     <button type="button" class="ad-tog" data-tog="ad-p-demo" aria-expanded="false">🎬 Mode présentation (passer d'un rôle à l'autre)</button>
     <div class="card" id="ad-p-demo" hidden><p class="small muted">Montre l'appli sur ton seul téléphone : tu passes de patron à coiffeur ou client avec la barre en haut de l'écran.</p><div id="ad-demo" class="stack"><p class="muted">Chargement…</p></div></div>
     <button type="button" class="ad-tog" data-tog="ad-p-inv" aria-expanded="false">📲 Inviter un nouveau patron (lien ou QR code)</button>
-    <div class="card" id="ad-p-inv" hidden><p class="small muted">Remplis ce que tu sais. Le patron scanne le QR code ou ouvre le lien reçu par WhatsApp : l'appli lui propose de s'installer, et son salon est déjà rempli.</p>
+    <div class="card" id="ad-p-inv" hidden><button class="btn" type="button" id="iv-quick">Montrer le QR au patron maintenant</button><p class="small muted">Il le scanne devant toi : l'appli s'ouvre, propose de s'installer, et il crée son salon. Ou bien prépare son salon d'avance :</p><p class="small muted" hidden>Remplis ce que tu sais. Le patron scanne le QR code ou ouvre le lien reçu par WhatsApp : l'appli lui propose de s'installer, et son salon est déjà rempli.</p>
       <form id="ad-inv" class="stack" data-keep><input class="field" id="iv-n" maxlength="40" placeholder="Nom du salon"><input class="field" id="iv-q" maxlength="50" placeholder="Quartier et ville">
         <input class="field" id="iv-t" inputmode="tel" maxlength="20" placeholder="Numéro WhatsApp du patron"><input class="field" id="iv-c" maxlength="120" placeholder="Prénoms des coiffeurs (séparés par des virgules)">
         <button class="btn">Créer le lien et le QR code</button></form><div id="iv-out"></div></div>
@@ -59,6 +59,13 @@ ROUTES.admin = () => {
       + (m.some((s) => s.demo) ? "" : `<button class="btn" type="button" id="ad-new-demo">Créer un salon de démonstration</button>`);
   }).catch(() => {});
   demos();
+  // QR plein écran à faire scanner sur place, sans rien remplir
+  $("#iv-quick").onclick = () => {
+    const link = `${baseUrl()}#invite/${encodeURIComponent("{}")}`;
+    const o = document.createElement("div"); o.className = "qr-full"; o.setAttribute("role", "dialog"); o.setAttribute("aria-label", "QR code pour un nouveau patron");
+    o.innerHTML = `<div class="qr-print"><b>Salon</b>${qrSvg(link, 280)}<span>Patron : scanne pour installer l'appli et créer ton salon</span></div><button class="btn alt" type="button">Fermer</button>`;
+    o.onclick = () => o.remove(); document.body.appendChild(o);
+  };
   $("#ad-inv").onsubmit = (e) => {
     e.preventDefault();
     const v = (id) => $(id).value.trim(), o = { n: v("#iv-n"), q: v("#iv-q"), t: v("#iv-t"), c: v("#iv-c") };

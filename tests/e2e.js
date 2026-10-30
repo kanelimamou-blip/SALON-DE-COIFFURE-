@@ -28,7 +28,8 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
 
   // 1. Le patron crée son compte et son salon
   const pat = await phone('patron'); await pat.goto(U + '#demarrer'); await W(pat, 2500);
-  await pat.fill('#em-mail', `patron${Date.now()}@test.sn`); await pat.fill('#em-pass', 'secret123'); await pat.click('#em [data-a="new"]'); await W(pat, 3000);
+  const PAT = `patron${Date.now()}@test.sn`;
+  await pat.fill('#em-mail', PAT); await pat.fill('#em-pass', 'secret123'); await pat.click('#em [data-a="new"]'); await W(pat, 3000);
   await pat.fill('#n-name', 'Salon Essai'); await pat.fill('#n-q', 'Médina'); await pat.fill('#n-tel', '771112233'); await pat.fill('#n-coif', 'Modou, Ibou');
   await pat.click('#new .btn'); await W(pat, 3000);
   const sid = (await pat.evaluate(() => JSON.parse(localStorage.getItem('salon-me')))).sid;
@@ -75,9 +76,10 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   await pat.click('#f-guide [data-g="coif"]'); await W(pat, 3000);
   check(pat.url().endsWith('#salon/d-coif') && await pat.evaluate(() => document.getElementById('d-coif').open), 'guide : ouvre la rubrique Coiffeurs');
   check(await pat.isVisible('#s-code svg'), 'patron : QR code pour relier un coiffeur');
-  const code = await pat.evaluate(() => document.querySelectorAll('#s-code b.code')[1].textContent.trim());
-  const coi = await phone('coiffeur'); await coi.goto(U + '#rejoindre/' + sid + '-' + code); await W(coi, 3500);
-  check(await coi.isVisible('#j-who [data-c]'), 'coiffeur : QR scanné, il n\'a plus qu\'à toucher son prénom');
+  const code = (await pat.textContent('#sc')).trim();
+  const coi = await phone('coiffeur'); await coi.goto(U); await W(coi, 2500);
+  await coi.fill('#cli-code', code); await coi.click('#cli .btn'); await W(coi, 3500);
+  check(code.length === 10 && await coi.isVisible('#j-who [data-c]'), 'coiffeur : un seul code sur l\'accueil, il n\'a plus qu\'à toucher son prénom');
   await coi.click('#j-who [data-c]:nth-child(2)'); await W(coi, 3000);
   await coi.goto(U + '#caisse'); await W(coi, 3000);
   await pat.goto(U + '#file'); await W(pat, 2500);
@@ -148,7 +150,7 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   check(await neuf.isHidden('#adm-link') && (await txt(neuf, 'main')).includes('Espace propriétaire'), 'client : pas de bouton admin, lien discret en bas de l\'accueil');
   // 13. L'admin invite un nouveau patron : lien et QR code, salon prérempli chez le patron
   await adm.goto(U + '#admin'); await W(adm, 2500);
-  await adm.click('[data-tog="ad-p-inv"]'); await adm.fill('#iv-n', 'Salon Invité'); await adm.fill('#iv-q', 'Pikine'); await adm.fill('#iv-t', '771234567'); await adm.fill('#iv-c', 'Abdou, Lamine');
+  await adm.click('[data-tog="ad-p-inv"]'); await adm.click('#iv-quick'); await W(adm, 300); check(await adm.isVisible('.qr-full svg'), 'admin : QR plein écran pour un nouveau patron'); await adm.click('.qr-full'); await adm.fill('#iv-n', 'Salon Invité'); await adm.fill('#iv-q', 'Pikine'); await adm.fill('#iv-t', '771234567'); await adm.fill('#iv-c', 'Abdou, Lamine');
   await adm.click('#ad-inv .btn'); await W(adm, 1000);
   if (process.env.SHOTS) { await adm.evaluate(() => scrollTo(0, 0)); await adm.screenshot({ path: process.env.SHOTS + '/admin.png', fullPage: true }); }
   const link = await adm.evaluate(() => document.querySelector('#iv-out a[href*="wa.me"]').href);
@@ -162,6 +164,18 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   await np.click('#new .btn'); await W(np, 3000);
   await adm.goto(U + '#admin'); await W(adm, 3000);
   check((await txt(adm, '#ad-list')).includes('Salon Invité'), 'admin : le salon invité apparaît dans la liste');
+  // 14. Le patron se reconnecte sur un autre téléphone : « Se connecter » l'emmène directement dans son salon
+  const pat2 = await phone('patron-2'); await pat2.goto(U); await W(pat2, 2500);
+  await pat2.click('a[href="#demarrer/auto"]'); await W(pat2, 2000);
+  await pat2.fill('#em-mail', PAT); await pat2.fill('#em-pass', 'secret123'); await pat2.click('#em [data-a="in"]'); await W(pat2, 4000);
+  check(pat2.url().endsWith('#file') && (await txt(pat2, '#tabs')).includes('Bilan'), 'patron : « Se connecter » ouvre directement son salon');
+  await coi.goto(U + '#file'); await W(coi, 2500); await coi.click('#f-qr'); await W(coi, 500);
+  check(await coi.isVisible('.qr-full svg'), 'coiffeur : QR client affiché en grand');
+  await coi.click('.qr-full'); await W(coi, 300);
+  check(!(await coi.isVisible('.qr-full')), 'coiffeur : QR client refermé');
+  const cl3 = await phone('client-3'); await cl3.goto(U); await W(cl3, 2500);
+  await cl3.fill('#cli-code', sid.toLowerCase()); await cl3.click('#cli .btn'); await W(cl3, 3000);
+  check(cl3.url().includes('#ticket/' + sid), 'client : le code du salon ouvre la page du ticket');
   const notAdmin = await phone('pas-admin'); await notAdmin.goto(U + '#admin'); await W(notAdmin, 2500);
   check((await txt(notAdmin, 'main')).includes('Connecte-toi'), 'espace admin fermé sans compte');
 

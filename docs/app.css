@@ -293,3 +293,6 @@ a.dir{color:var(--ink);text-decoration:none}
 .guide-step{display:flex !important;flex-direction:row !important;align-items:center;gap:12px;text-align:left}
 .guide-step b{flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--blue-soft);color:var(--blue)}
 .guide-step.done{opacity:.6}.guide-step.done b{background:var(--ok-soft);color:var(--ok)}
+/* QR montré au client, en plein écran */
+.qr-full{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;background:rgba(0,0,0,.75)}
+.qr-full .qr-print{background:#fff;color:#121a2b}

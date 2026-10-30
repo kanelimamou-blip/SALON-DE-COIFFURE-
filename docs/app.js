@@ -214,16 +214,24 @@ ROUTES.accueil = () => {
       <p class="muted">Le client sait quand c'est son tour. Le patron sait combien rapporte chaque coiffeur.</p>
     </section>
     <div class="stack">
-      <a class="role" href="#demarrer"><b>Je suis le patron</b><span>Créer mon salon en une minute</span></a>
-      <a class="role" href="#rejoindre"><b>Je suis coiffeur</b><span>Rejoindre le salon avec le code du patron</span></a>
       <form class="role role-form" id="cli" data-keep>
-        <label for="cli-code"><b>Je suis client</b><span>Entre le code du salon ou scanne son QR code</span></label>
-        <div class="row"><input class="field" id="cli-code" maxlength="5" placeholder="Code (ex. K7P2Q)" autocapitalize="characters" autocomplete="off"><button class="btn">Entrer</button></div>
+        <label for="cli-code"><b>Entre ton code</b><span>Client : le code du salon (ex. K7P2Q). Coiffeur : le code donné par le patron (ex. K7P2Q-4XRT). Ou scanne le QR code.</span></label>
+        <div class="row"><input class="field" id="cli-code" maxlength="10" placeholder="Ton code" autocapitalize="characters" autocomplete="off"><button class="btn">Entrer</button></div>
+        <p class="small" id="cli-msg"></p>
         <a class="small" href="#annuaire">Pas de code ? Trouve un salon près de toi</a>
       </form>
+      <a class="role" href="#demarrer/auto"><b>Se connecter</b><span>Patron : ton salon, ta caisse et ton bilan. Nouveau ? Crée ton salon en une minute.</span></a>
     </div>
     <p class="small" style="text-align:center"><a class="muted" href="#admin">Espace propriétaire de l'appli</a></p>`;
-  $("#cli").onsubmit = (e) => { e.preventDefault(); const c = $("#cli-code").value.trim().toUpperCase(); if (c.length >= 4) go("ticket/" + c); };
+  // un seul code pour tout le monde : code du salon = client, code du salon + code coiffeur = coiffeur
+  $("#cli").onsubmit = (e) => {
+    e.preventDefault();
+    const c = $("#cli-code").value.trim().toUpperCase().replace(/[\s_]+/g, "-");
+    const m = c.match(/^([A-Z0-9]{5})-?([A-Z0-9]{4})$/);
+    if (m) return go(`rejoindre/${m[1]}-${m[2]}`);
+    if (/^[A-Z0-9]{5}$/.test(c)) return go("ticket/" + c);
+    $("#cli-msg").className = "small msg-ko"; $("#cli-msg").textContent = "Code incomplet : 5 caractères pour un client, 9 pour un coiffeur.";
+  };
 };
 
 // ---------- Invitation d'un nouveau patron (lien ou QR code créé dans l'espace admin) : son salon est prérempli
@@ -249,9 +257,9 @@ window.addEventListener("beforeinstallprompt", () => setTimeout(() => { const c 
 window.addEventListener("appinstalled", () => { const c = $("#inst-card"); if (c) c.remove(); toast("Appli installée"); });
 
 // ---------- Patron : connexion puis création du salon
-ROUTES.demarrer = async () => {
+ROUTES.demarrer = async (mode) => {
   if (!Store.isAccount()) {
-    $view.innerHTML = `${ME.invite ? installCard() : ""}<h1>Mon compte patron</h1>
+    $view.innerHTML = `${ME.invite ? installCard() : ""}<h1>Se connecter</h1>
       <div class="card"><p>Ton compte garde les chiffres du salon, même si tu changes de téléphone.</p>
         <button class="btn" id="g" type="button">Continuer avec Google</button></div>
       <form class="card" id="em" data-keep><h2>Ou avec un e-mail</h2>
@@ -271,6 +279,8 @@ ROUTES.demarrer = async () => {
   if (typeof isAdmin === "function" && isAdmin() && !ME.invite) return go("admin");
   const inv = ME.invite || {};
   const mine = await Store.mySalons().catch(() => []);
+  // « Se connecter » de l'accueil : le patron d'un seul salon arrive directement dans son salon
+  if (mode === "auto" && mine.length === 1 && !ME.invite) { Object.assign(ME, { role: "patron", sid: mine[0].id }); saveMe(); return go("file"); }
   $view.innerHTML = `${ME.invite ? installCard() : ""}<h1>Mon salon</h1>
     ${mine.length ? `<div class="card"><h2>Mes salons</h2>${mine.map((s) => `<button class="line-btn" data-sid="${esc(s.id)}" type="button"><b>${esc(s.name)}</b><span class="muted small">${esc(s.quartier || "")} · code ${esc(s.id)}</span></button>`).join("")}</div>` : ""}
     <form class="card" id="new" data-keep><h2>${mine.length ? "Ajouter un salon" : "Créer mon salon"}</h2>${inv.n ? `<p class="small muted">Tes informations sont déjà remplies : vérifie-les, puis crée le salon.</p>` : ""}
@@ -340,11 +350,17 @@ ROUTES.file = () => {
     <section><h2 class="sec">${t("Au fauteuil")}</h2><div id="f-chair" class="list"></div></section>
     <section><h2 class="sec">En attente</h2><div id="f-wait" class="list"></div></section>
     <section><h2 class="sec">Terminés aujourd'hui</h2><div id="f-done" class="list"></div></section>
-    <div class="row links"><a class="btn alt" href="#ecran/${esc(ME.sid)}">Écran d'attente</a><a class="btn alt" href="#page/${esc(ME.sid)}">Page du salon</a></div>
+    <div class="row links"><button class="btn" type="button" id="f-qr">QR client</button><a class="btn alt" href="#ecran/${esc(ME.sid)}">Écran d'attente</a><a class="btn alt" href="#page/${esc(ME.sid)}">Page du salon</a></div>
     <input type="file" accept="image/*" hidden id="f-photo">`;
   const fillSelects = () => {
     $("#a-svc").innerHTML = services().map((s) => `<option value="${esc(s.id)}">${esc(s.name)} · ${fcfa(s.price)}</option>`).join("");
     $("#a-coif").innerHTML = `<option value="">Coiffeur : peu importe</option>` + coiffeurs().map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+  };
+  // le coiffeur montre ce QR au client : en le scannant, le client arrive sur la page du ticket et s'inscrit
+  $("#f-qr").onclick = () => {
+    const o = document.createElement("div"); o.className = "qr-full"; o.setAttribute("role", "dialog"); o.setAttribute("aria-label", "QR code pour le client");
+    o.innerHTML = `<div class="qr-print"><b>${esc((LIVE.salon || {}).name || "")}</b>${qrSvg(ticketUrl(ME.sid), 280)}<span>Scanne pour prendre ton ticket</span><span class="code">${esc(ME.sid)}</span></div><button class="btn alt" type="button">Fermer</button>`;
+    o.onclick = () => o.remove(); document.body.appendChild(o);
   };
   $("#f-add").onsubmit = async (e) => {
     e.preventDefault();
@@ -639,7 +655,7 @@ ROUTES.salon = (part) => {
       const paint = (code) => {
         $("#s-code").innerHTML = `<div class="qr-box"><div class="qr-print">${qrSvg(`${baseUrl()}#rejoindre/${ME.sid}-${code}`, 180)}<span>Coiffeur : scanne pour relier ton téléphone</span></div>
           <div class="stack"><p class="small">Le coiffeur scanne ce QR code avec son téléphone, puis touche son prénom. Il voit ses coupes, pas la recette du salon.</p>
-          <p class="small muted">Sans QR : code du salon <b class="code">${esc(ME.sid)}</b>, code coiffeur <b class="code">${esc(code)}</b>.</p>
+          <p class="small muted">Sans QR : le coiffeur entre ce code sur l'accueil de l'appli <b class="code" id="sc">${esc(ME.sid)}-${esc(code)}</b></p>
           <button class="btn-ghost sm" type="button" id="sc-new">Changer le code (l'ancien QR ne marchera plus)</button></div></div>`;
         $("#sc-new").onclick = async () => { paint(await Store.newStaffCode(ME.sid)); toast("Nouveau code coiffeur"); };
       };
