@@ -23,6 +23,8 @@ const Store = (() => {
     await Promise.all([loadJs(SDK + "firebase-auth-compat.js"), loadJs(SDK + "firebase-firestore-compat.js")]);
     firebase.initializeApp(FIREBASE_CONFIG);
     auth = firebase.auth(); db = firebase.firestore(); FV = firebase.firestore.FieldValue;
+    // tests : émulateurs Firebase locaux
+    if (window.SALON_EMU) { auth.useEmulator("http://127.0.0.1:9099"); db.useEmulator("127.0.0.1", 8080); }
     // mode hors connexion (idée 65) : lectures depuis le cache, écritures envoyées au retour du réseau
     await db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
     await auth.getRedirectResult().catch(() => null);
@@ -72,14 +74,22 @@ const Store = (() => {
     (where || []).forEach(([f, op, v]) => { q = q.where(f, op, v); });
     return q.onSnapshot((snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), err || (() => {}));
   }
-  async function add(sid, col, obj) {
+  // Une écriture refusée par le serveur est signalée à l'appli (sinon elle disparaît sans bruit)
+  const refused = (e) => { window.dispatchEvent(new CustomEvent("store-refused", { detail: e })); throw e; };
+  // Avec confirm, on attend la réponse du serveur quelques secondes : refus = erreur ; sans réseau = gardé pour plus tard
+  const settle = (p, confirm) => {
+    p = p.catch(refused);
+    if (!confirm) { p.catch(() => {}); return Promise.resolve(); }
+    return Promise.race([p.then(() => "ok"), new Promise((ok) => setTimeout(() => ok("plus tard"), 6000))]);
+  };
+  async function add(sid, col, obj, confirm) {
     const ref = S(sid).collection(col).doc();
-    ref.set(obj).catch(() => {});   // sans attendre : hors connexion, l'écriture part plus tard
+    await settle(ref.set(obj), confirm);
     return ref.id;
   }
-  const set = (sid, col, id, obj) => S(sid).collection(col).doc(id).set(obj);
-  async function update(sid, col, id, patch) { S(sid).collection(col).doc(id).update(patch).catch(() => {}); }
-  async function remove(sid, col, id) { S(sid).collection(col).doc(id).delete().catch(() => {}); }
+  const set = (sid, col, id, obj, confirm) => settle(S(sid).collection(col).doc(id).set(obj), confirm);
+  const update = (sid, col, id, patch, confirm) => settle(S(sid).collection(col).doc(id).update(patch), confirm);
+  const remove = (sid, col, id) => settle(S(sid).collection(col).doc(id).delete());
   async function getDoc(sid, col, id) { const d = await S(sid).collection(col).doc(id).get(); return d.exists ? { id, ...d.data() } : null; }
 
   // Numéro de ticket du jour, sans doublon même si deux clients le prennent en même temps

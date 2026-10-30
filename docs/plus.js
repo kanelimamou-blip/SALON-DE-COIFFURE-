@@ -161,13 +161,13 @@ ROUTES.reserver = (sid) => {
       try {
         const u = await Store.ensureUser();
         if (ch.report) {
-          await Store.update(sid, "rdv", ch.report, { day: ch.day, time: ch.time });
+          await Store.update(sid, "rdv", ch.report, { day: ch.day, time: ch.time }, true);
           ch.report = null; toast("Rendez-vous déplacé"); return refresh();
         }
         const o = { day: ch.day, time: ch.time, name, serviceId: ch.svc, coiffeurId: ch.coif || null, type: ch.type, status: "confirme", at: Date.now(), uid: u };
         if (occ) { o.occasion = $("#rv-occ").value; o.acompte = { amount: s.acompte || 2000, ref: $("#rv-ref").value.trim(), ok: false }; }
         if (dom) o.address = $("#rv-addr").value.trim();
-        const id = await Store.add(sid, "rdv", o);
+        const id = await Store.add(sid, "rdv", o, true);
         Store.set(sid, "contacts", id, { day: ch.day, phone: tel }).catch(() => {});
         ME.rdv[sid].push(id); saveMe(); ch.time = ""; toast(`Rendez-vous réservé : ${dayLabel(o.day).toLowerCase()} à ${o.time}`); refresh();
       } catch (er) { $("#rv-msg").className = "small msg-ko"; $("#rv-msg").textContent = "Réservation impossible. Vérifie le réseau."; }

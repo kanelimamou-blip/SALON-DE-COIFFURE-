@@ -760,7 +760,7 @@ ROUTES.ticket = (sid) => {
           try {
             const u = await Store.ensureUser();
             const day = dayOf(), num = await Store.nextNumber(sid, day);
-            const id = await Store.add(sid, "queue", { day, num, name, serviceId: choice.svc, coiffeurId: choice.coif || null, status: "attente", at: Date.now(), uid: u, express: !!svcOf(choice.svc).express });
+            const id = await Store.add(sid, "queue", { day, num, name, serviceId: choice.svc, coiffeurId: choice.coif || null, status: "attente", at: Date.now(), uid: u, express: !!svcOf(choice.svc).express }, true);
             if (tel) Store.set(sid, "contacts", id, { day, phone: tel }).catch(() => {});
             ME.tickets[sid] = { id, day }; saveMe(); notified = false; lastStatus = null; refresh();
           } catch (er) { $("#t-msg").className = "small msg-ko"; $("#t-msg").textContent = "Ticket impossible pour le moment. Vérifie le réseau."; }
@@ -862,6 +862,8 @@ ROUTES.wave = (sid) => {
 let installEvt = null;
 window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; $("#install").hidden = false; });
 $("#install").onclick = async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; $("#install").hidden = true; };
+// Le serveur a refusé une écriture : le dire au lieu de faire croire que c'est enregistré
+window.addEventListener("store-refused", (e) => toast(/permission/i.test(e.detail && e.detail.code || "") ? "Refusé par le serveur : cette action n'est pas autorisée." : "Enregistrement impossible. Réessaie."));
 const net = () => { $("#offline").hidden = navigator.onLine; };
 window.addEventListener("online", net); window.addEventListener("offline", net);
 if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
