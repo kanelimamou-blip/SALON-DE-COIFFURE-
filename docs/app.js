@@ -231,6 +231,14 @@ ROUTES.accueil = () => {
   $("#scr").onsubmit = (e) => { e.preventDefault(); const c = $("#scr-code").value.trim().toUpperCase(); if (c.length >= 4) go("ecran/" + c); };
 };
 
+// ---------- Invitation d'un nouveau patron (lien ou QR code créé dans l'espace admin) : son salon est prérempli
+ROUTES.invite = (data) => {
+  try { const o = JSON.parse(data); ME.invite = { n: String(o.n || "").slice(0, 40), q: String(o.q || "").slice(0, 50), t: String(o.t || "").slice(0, 20), c: String(o.c || "").slice(0, 120) }; }
+  catch (e) { ME.invite = null; }
+  Object.assign(ME, { role: null, sid: null }); saveMe();
+  go("demarrer");
+};
+
 // ---------- Patron : connexion puis création du salon
 ROUTES.demarrer = async () => {
   if (!Store.isAccount()) {
@@ -250,15 +258,16 @@ ROUTES.demarrer = async () => {
     return;
   }
   // le propriétaire de l'appli qui vient de se connecter va sur son espace admin
-  if (typeof isAdmin === "function" && isAdmin()) return go("admin");
+  if (typeof isAdmin === "function" && isAdmin() && !ME.invite) return go("admin");
+  const inv = ME.invite || {};
   const mine = await Store.mySalons().catch(() => []);
   $view.innerHTML = `<h1>Mon salon</h1>
     ${mine.length ? `<div class="card"><h2>Mes salons</h2>${mine.map((s) => `<button class="line-btn" data-sid="${esc(s.id)}" type="button"><b>${esc(s.name)}</b><span class="muted small">${esc(s.quartier || "")} · code ${esc(s.id)}</span></button>`).join("")}</div>` : ""}
-    <form class="card" id="new" data-keep><h2>${mine.length ? "Ajouter un salon" : "Créer mon salon"}</h2>
-      <label class="lbl" for="n-name">Nom du salon</label><input class="field" id="n-name" required maxlength="40" placeholder="Ex. Salon Teranga">
-      <label class="lbl" for="n-q">Quartier et ville</label><input class="field" id="n-q" maxlength="50" placeholder="Ex. Médina, Dakar">
-      <label class="lbl" for="n-tel">Numéro WhatsApp du salon</label><input class="field" id="n-tel" inputmode="tel" maxlength="20" placeholder="Ex. 77 123 45 67">
-      <label class="lbl" for="n-coif">Prénoms des coiffeurs (séparés par des virgules)</label><input class="field" id="n-coif" maxlength="120" placeholder="Ex. Modou, Ibou, Pape">
+    <form class="card" id="new" data-keep><h2>${mine.length ? "Ajouter un salon" : "Créer mon salon"}</h2>${inv.n ? `<p class="small muted">Tes informations sont déjà remplies : vérifie-les, puis crée le salon.</p>` : ""}
+      <label class="lbl" for="n-name">Nom du salon</label><input class="field" id="n-name" required maxlength="40" placeholder="Ex. Salon Teranga" value="${esc(inv.n || "")}">
+      <label class="lbl" for="n-q">Quartier et ville</label><input class="field" id="n-q" maxlength="50" placeholder="Ex. Médina, Dakar" value="${esc(inv.q || "")}">
+      <label class="lbl" for="n-tel">Numéro WhatsApp du salon</label><input class="field" id="n-tel" inputmode="tel" maxlength="20" placeholder="Ex. 77 123 45 67" value="${esc(inv.t || "")}">
+      <label class="lbl" for="n-coif">Prénoms des coiffeurs (séparés par des virgules)</label><input class="field" id="n-coif" maxlength="120" placeholder="Ex. Modou, Ibou, Pape" value="${esc(inv.c || "")}">
       <button class="btn">Créer le salon</button></form>`;
   $$("[data-sid]").forEach((b) => (b.onclick = () => { Object.assign(ME, { role: "patron", sid: b.dataset.sid }); saveMe(); go("file"); }));
   $("#new").onsubmit = async (e) => {
@@ -266,7 +275,7 @@ ROUTES.demarrer = async () => {
     const names = $("#n-coif").value.split(",").map((s) => s.trim()).filter(Boolean);
     const data = { name: $("#n-name").value.trim(), quartier: $("#n-q").value.trim(), tel: $("#n-tel").value.trim(), open: true,
       services: defaultServices(), coiffeurs: (names.length ? names : ["Patron"]).map((n) => ({ id: uid(), name: n, pct: 40 })) };
-    try { const sid = await Store.createSalon(data); Object.assign(ME, { role: "patron", sid }); saveMe(); toast("Salon créé"); go("salon"); }
+    try { const sid = await Store.createSalon(data); Object.assign(ME, { role: "patron", sid, invite: null }); saveMe(); toast("Salon créé"); go("salon"); }
     catch (er) { toast("Création impossible. Vérifie le réseau."); }
   };
 };

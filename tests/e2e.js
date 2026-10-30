@@ -94,7 +94,7 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   const adm = await phone('admin'); await adm.goto(U + '#admin'); await W(adm, 2500);
   await adm.fill('#ad-mail', ADMIN.email); await adm.fill('#ad-pass', 'admin123'); await adm.click('#ad-em .btn'); await W(adm, 4000);
   check((await txt(adm, '#ad-list')).includes('Salon Essai'), 'admin : voit le salon dans la liste');
-  check((await txt(adm, '#ad-kpi')).includes('salons inscrits'), 'admin : chiffres globaux affichés');
+  check((await txt(adm, '#ad-kpi')).includes('inscrit'), 'admin : chiffres globaux affichés');
   check((await txt(adm, `[data-sid="${sid}"]`)).includes('Actif'), 'admin : salon actif cette semaine');
   check((await txt(adm, '#ad-err')).includes('Erreur de test e2e'), 'admin : erreur d\'un téléphone remontée');
   const peek = await cli.evaluate(async () => { try { await firebase.firestore().collection('erreurs').get(); return 'accepté'; } catch (e) { return e.code; } });
@@ -136,6 +136,19 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   check(adm.url().endsWith('#admin'), 'propriétaire : retour à l\'admin en un appui');
   const neuf = await phone('nouveau'); await neuf.goto(U + '#accueil'); await W(neuf, 2500);
   check(await neuf.isHidden('#adm-link') && (await txt(neuf, 'main')).includes('Espace propriétaire'), 'client : pas de bouton admin, lien discret en bas de l\'accueil');
+  // 13. L'admin invite un nouveau patron : lien et QR code, salon prérempli chez le patron
+  await adm.goto(U + '#admin'); await W(adm, 2500);
+  await adm.fill('#iv-n', 'Salon Invité'); await adm.fill('#iv-q', 'Pikine'); await adm.fill('#iv-t', '771234567'); await adm.fill('#iv-c', 'Abdou, Lamine');
+  await adm.click('#ad-inv .btn'); await W(adm, 1000);
+  const link = await adm.evaluate(() => document.querySelector('#iv-out a[href*="wa.me"]').href);
+  const inviteUrl = decodeURIComponent(link.split('text=')[1]).match(/http\S+/)[0];
+  check(await adm.isVisible('#iv-out svg') && inviteUrl.includes('#invite/'), 'admin : lien et QR code d\'invitation créés');
+  const np = await phone('nouveau-patron'); await np.goto(inviteUrl); await W(np, 2500);
+  await np.fill('#em-mail', `np${Date.now()}@test.sn`); await np.fill('#em-pass', 'patron123'); await np.click('#em [data-a="new"]'); await W(np, 3000);
+  check(await np.inputValue('#n-name') === 'Salon Invité' && await np.inputValue('#n-coif') === 'Abdou, Lamine', 'nouveau patron : salon prérempli après l\'inscription');
+  await np.click('#new .btn'); await W(np, 3000);
+  await adm.goto(U + '#admin'); await W(adm, 3000);
+  check((await txt(adm, '#ad-list')).includes('Salon Invité'), 'admin : le salon invité apparaît dans la liste');
   const notAdmin = await phone('pas-admin'); await notAdmin.goto(U + '#admin'); await W(notAdmin, 2500);
   check((await txt(notAdmin, 'main')).includes('Connecte-toi'), 'espace admin fermé sans compte');
 

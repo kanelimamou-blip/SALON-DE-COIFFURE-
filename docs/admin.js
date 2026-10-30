@@ -34,6 +34,10 @@ ROUTES.admin = () => {
   viewSubs.push(Store.watchErrors(Date.now() - 7 * 864e5, (r) => { errs = r; paint(); }));
   $view.innerHTML = `<h1>Espace admin</h1>
     <div class="card"><h2>Mode présentation</h2><p class="small muted">Montre l'appli sur ton seul téléphone : tu passes de patron à coiffeur ou client avec la barre en haut de l'écran.</p><div id="ad-demo" class="stack"><p class="muted">Chargement…</p></div></div>
+    <div class="card"><h2>Nouveau patron</h2><p class="small muted">Remplis ce que tu sais, puis fais scanner le QR code ou envoie le lien : l'appli s'ouvre chez lui avec son salon déjà rempli.</p>
+      <form id="ad-inv" class="stack" data-keep><input class="field" id="iv-n" maxlength="40" placeholder="Nom du salon"><input class="field" id="iv-q" maxlength="50" placeholder="Quartier et ville">
+        <input class="field" id="iv-t" inputmode="tel" maxlength="20" placeholder="Numéro WhatsApp du patron"><input class="field" id="iv-c" maxlength="120" placeholder="Prénoms des coiffeurs (séparés par des virgules)">
+        <button class="btn">Créer le lien et le QR code</button></form><div id="iv-out"></div></div>
     <div id="ad-kpi"></div>
     <div class="row" data-keep><input class="field" id="ad-q" placeholder="Chercher un salon, un quartier, un code" autocomplete="off"></div>
     <div class="chips" id="ad-f">${["tous", "actifs", "inactifs", "nouveaux", "suspendus"].map((f) => `<button type="button" class="chip" data-f="${f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join("")}</div>
@@ -46,13 +50,25 @@ ROUTES.admin = () => {
       + (m.some((s) => s.demo) ? "" : `<button class="btn" type="button" id="ad-new-demo">Créer un salon de démonstration</button>`);
   }).catch(() => {});
   demos();
+  $("#ad-inv").onsubmit = (e) => {
+    e.preventDefault();
+    const v = (id) => $(id).value.trim(), o = { n: v("#iv-n"), q: v("#iv-q"), t: v("#iv-t"), c: v("#iv-c") };
+    Object.keys(o).forEach((k) => { if (!o[k]) delete o[k]; });
+    const link = `${baseUrl()}#invite/${encodeURIComponent(JSON.stringify(o))}`;
+    const text = `Bonjour${o.n ? ", voici l'appli pour " + o.n : ""} : la file d'attente, les rendez-vous et la caisse du salon sur ton téléphone. Ouvre ce lien pour créer ton salon : ${link}`;
+    $("#iv-out").innerHTML = `<div class="qr-box"><div class="qr-print">${o.n ? `<b>${esc(o.n)}</b>` : ""}${qrSvg(link, 220)}<span>Scanne pour créer ton salon</span></div>
+      <div class="row"><button class="btn sm" type="button" id="iv-share">Partager le lien</button><button class="btn-ghost sm" type="button" id="iv-copy">Copier</button>
+      ${o.t ? `<a class="btn-ghost sm" target="_blank" rel="noopener" href="${waLink(o.t, text)}">WhatsApp</a>` : ""}</div></div>`;
+    $("#iv-copy").onclick = () => navigator.clipboard.writeText(link).then(() => toast("Lien copié"), () => toast("Copie impossible"));
+    $("#iv-share").onclick = async () => { try { if (navigator.share) return await navigator.share({ text, url: link }); } catch (er) { if (er.name === "AbortError") return; } navigator.clipboard.writeText(link).then(() => toast("Lien copié"), () => {}); };
+  };
   $("#ad-q").oninput = (e) => { q = e.target.value.trim().toLowerCase(); paint(); };
   $("#ad-f").onclick = (e) => { const b = e.target.closest("[data-f]"); if (b) { filter = b.dataset.f; paint(); } };
   const keep = (s) => { const st = salonState(s, act[s.id])[0]; return filter === "tous" || (filter === "actifs" && st === "Actif") || (filter === "inactifs" && st === "Inactif") || (filter === "nouveaux" && st === "Nouveau") || (filter === "suspendus" && st === "Suspendu"); };
   function paint() {
     if (!$("#ad-list")) return;
     const n = (st) => rows.filter((s) => salonState(s, act[s.id])[0] === st).length;
-    $("#ad-kpi").innerHTML = `<div class="kpis"><div><b>${rows.filter((s) => !s.demo).length}</b><span>salons inscrits</span></div><div><b>${n("Actif")}</b><span>actifs cette semaine</span></div><div><b>${n("Inactif")}</b><span>inactifs</span></div><div><b>${errs.length}</b><span>erreurs (7 j)</span></div></div>`;
+    $("#ad-kpi").innerHTML = `<div class="kpis"><div><b>${rows.filter((s) => !s.demo).length}</b><span>${rows.filter((s) => !s.demo).length > 1 ? "salons inscrits" : "salon inscrit"}</span></div><div><b>${n("Actif")}</b><span>actifs cette semaine</span></div><div><b>${n("Inactif")}</b><span>inactifs</span></div><div><b>${errs.length}</b><span>erreurs (7 j)</span></div></div>`;
     $$("#ad-f [data-f]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.f === filter));
     const list = rows.filter((s) => keep(s) && (!q || `${s.name} ${s.quartier || ""} ${s.id}`.toLowerCase().includes(q)));
     $("#ad-list").innerHTML = list.length ? list.map((s) => {
