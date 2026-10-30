@@ -10,6 +10,7 @@ service cloud.firestore {
     function staffDoc(sid) { return /databases/$(db)/documents/salons/$(sid)/staff/$(request.auth.uid); }
     function staff(sid) { return signed() && exists(staffDoc(sid)); }
     function team(sid) { return owner(sid) || staff(sid); }
+    // l'admin peut tout lire (voir un salon comme son patron, pour le support), sans rien modifier
     // un salon suspendu par l'admin ne prend plus de tickets ni de rendez-vous, et sa caisse est fermée
     function open(sid) { return salon(sid).get('blocked', false) != true; }
     function active(sid) { return open(sid); }
@@ -24,9 +25,9 @@ service cloud.firestore {
       allow update: if (owner(sid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['owner', 'created', 'blocked']))
         || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blocked']));
 
-      match /private/{doc} { allow read, write: if owner(sid); }
+      match /private/{doc} { allow read: if owner(sid) || admin(); allow write: if owner(sid); }
       match /staff/{uid} {
-        allow read: if owner(sid) || (signed() && request.auth.uid == uid);
+        allow read: if owner(sid) || admin() || (signed() && request.auth.uid == uid);
         allow create: if signed() && request.auth.uid == uid
           && request.resource.data.code == get(/databases/$(db)/documents/salons/$(sid)/private/config).data.staffCode;
         allow delete: if owner(sid);
@@ -42,11 +43,13 @@ service cloud.firestore {
       }
       match /contacts/{id} {
         allow create: if signed();
-        allow read, update, delete: if team(sid);
+        allow read: if team(sid) || admin();
+        allow update, delete: if team(sid);
       }
       // un coiffeur ne voit que ses propres coupes (idée 66)
       match /ventes/{id} {
-        allow read, update, delete: if active(sid) && (owner(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
+        allow read: if admin() || (active(sid) && (owner(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId)));
+        allow update, delete: if active(sid) && (owner(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
         allow create: if active(sid) && (owner(sid) || (staff(sid) && request.resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
       }
       // rendez-vous : les créneaux pris sont publics (prénom seulement), le client peut annuler ou reporter le sien
@@ -58,13 +61,13 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'day', 'time']));
         allow delete: if owner(sid);
       }
-      match /clients/{id} { allow read, write: if team(sid); }
+      match /clients/{id} { allow read: if team(sid) || admin(); allow write: if team(sid); }
       match /pointage/{id} {
         allow read: if true;
         allow write: if team(sid);
       }
-      match /depenses/{id} { allow read, write: if owner(sid) && active(sid); }
-      match /stock/{id} { allow read, write: if owner(sid) && active(sid); }
+      match /depenses/{id} { allow read: if admin() || (owner(sid) && active(sid)); allow write: if owner(sid) && active(sid); }
+      match /stock/{id} { allow read: if admin() || (owner(sid) && active(sid)); allow write: if owner(sid) && active(sid); }
       match /galerie/{id} { allow read: if true; allow write: if owner(sid); }
     }
 

@@ -106,6 +106,27 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   const forced = await cli2.evaluate(async (sid) => { try { const u = (await firebase.auth().signInAnonymously()).user; await firebase.firestore().collection('salons').doc(sid).collection('queue').add({ day: '2030-01-01', num: 1, name: 'X', status: 'attente', uid: u.uid }); return 'accepté'; } catch (e) { return e.code; } }, sid);
   check(forced === 'permission-denied', 'règles : ticket refusé sur un salon suspendu (' + forced + ')');
   await adm.click(`[data-sid="${sid}"] [data-ad="unblock"]`); await W(adm, 2000);
+  // 10. Mode présentation : salon de démo, puis patron, coiffeur et client sur le même téléphone
+  await adm.goto(U + '#admin'); await W(adm, 2500);
+  await adm.click('#ad-new-demo'); await W(adm, 5000);
+  check((await txt(adm, 'main')).includes('Fallou') && (await txt(adm, '#demo-bar')).includes('Présentation'), 'présentation : salon démo créé, file remplie, barre affichée');
+  await adm.click('[data-dr="coiffeur"]'); await W(adm, 2500);
+  check((await txt(adm, '#tabs')).includes('Mes coupes'), 'présentation : vue coiffeur');
+  await adm.click('[data-dr="client"]'); await W(adm, 2500);
+  check(adm.url().includes('#ticket/') && (await txt(adm, '#t-body')).includes('Salon Démo'), 'présentation : vue client');
+  await adm.screenshot({ path: __dirname + '/../../presentation.png' });
+  await adm.click('[data-dr="patron"]'); await W(adm, 2500);
+  check((await txt(adm, '#tabs')).includes('Bilan'), 'présentation : retour patron');
+  await adm.click('[data-dr="fin"]'); await W(adm, 2500);
+  check(adm.url().endsWith('#admin') && await adm.isHidden('#demo-bar') && (await txt(adm, '#ad-list')).includes('Démo'), 'présentation : fin, retour à l\'admin');
+  // 11. L'admin ouvre le salon d'un client en vue patron : il voit tout, mais ne peut rien modifier
+  await adm.click(`[data-sid="${sid}"] [data-demo]`); await W(adm, 3000);
+  check((await txt(adm, '#demo-bar')).includes('Vue de Salon Essai'), 'admin : vue patron du salon d\'un client');
+  await adm.goto(U + '#bilan'); await W(adm, 3000);
+  check((await txt(adm, 'main')).includes('1 500'), 'admin : voit le bilan réel du salon (1 500 F)');
+  const w = await adm.evaluate(async (sid) => { try { await firebase.firestore().collection('salons').doc(sid).update({ name: 'Piraté' }); return 'accepté'; } catch (e) { return e.code; } }, sid);
+  check(w === 'permission-denied', 'règles : l\'admin ne modifie pas le salon d\'un client (' + w + ')');
+  await adm.click('[data-dr="fin"]'); await W(adm, 2000);
   const notAdmin = await phone('pas-admin'); await notAdmin.goto(U + '#admin'); await W(notAdmin, 2500);
   check((await txt(notAdmin, 'main')).includes('Connecte-toi'), 'espace admin fermé sans compte');
 

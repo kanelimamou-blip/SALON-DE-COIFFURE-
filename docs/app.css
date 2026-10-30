@@ -276,3 +276,8 @@ a.dir{color:var(--ink);text-decoration:none}
 .st-ok{background:var(--ok-soft);color:var(--ok)}.st-trial{background:var(--blue-soft);color:var(--blue)}
 .st-late{background:var(--warn-soft);color:var(--warn)}.st-neg{background:var(--accent-soft);color:var(--ko)}
 .sel{user-select:all;-webkit-user-select:all;overflow-wrap:anywhere}
+/* barre du mode présentation (espace admin) */
+.demo-bar{position:sticky;top:56px;z-index:4;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 16px;background:var(--blue-soft);border-bottom:1px solid var(--line)}
+.demo-bar[hidden]{display:none}
+.demo-bar .chip{min-height:34px;padding:4px 12px}
+.demo-bar .btn-ghost{margin-left:auto}

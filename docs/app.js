@@ -60,7 +60,7 @@ function follow(sid, role) {
   Object.assign(LIVE, { key, sid, salon: null, queue: [], ventes: [], depenses: [], stock: [], pointage: [], contacts: {}, subs: [] });
   const on = (k) => (v) => { LIVE[k] = v; refresh(); };
   const today = dayOf();
-  LIVE.subs.push(Store.watchSalon(sid, (v) => { LIVE.salon = v; tabs(document.body.dataset.route); refresh(); }));
+  LIVE.subs.push(Store.watchSalon(sid, (v) => { LIVE.salon = v; tabs(document.body.dataset.route); if (window.demoBar) demoBar(); refresh(); }));
   LIVE.subs.push(Store.watch(sid, "queue", [["day", "==", today]], on("queue")));
   LIVE.subs.push(Store.watch(sid, "pointage", [["day", "==", today]], on("pointage")));
   if (role === "patron") {
@@ -179,6 +179,7 @@ function render() {
   if (["bilan", "salon", "clients", "offres"].includes(route) && ME.role !== "patron") route = "file";
   if (isStaff() && ME.sid) follow(ME.sid, ME.role);
   tabs(route);
+  if (window.demoBar) demoBar();
   ROUTES[route](arg ? decodeURIComponent(arg) : "");
   $view.focus({ preventScroll: true });
   window.scrollTo(0, 0);

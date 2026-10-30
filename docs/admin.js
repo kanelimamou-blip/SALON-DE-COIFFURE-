@@ -1,12 +1,13 @@
 "use strict";
-// Espace admin du propriétaire de l'appli : voir tous les salons, leur activité et les erreurs, suspendre un salon.
+// Espace admin du propriétaire de l'appli : voir tous les salons, leur activité et les erreurs, suspendre un salon,
+// et ouvrir n'importe quel salon en vue patron, coiffeur ou client (lecture seule côté règles, sauf ses propres salons).
 // Le paiement de l'abonnement se fait hors de l'appli.
 // Accès : comptes listés dans CFG.admins (et dans firestore.rules, qui protège les écritures).
 
 const isAdmin = () => !!Store.uid && CFG.admins.includes(Store.uid);
 const ageDays = (s) => Math.floor((Date.now() - (s.created || Date.now())) / 864e5);
 // actif : des tickets ou des rendez-vous ces 7 derniers jours
-const salonState = (s, a) => s.blocked ? ["Suspendu", "neg"] : !a ? ["…", "trial"] : a.tickets + a.rdv > 0 ? ["Actif", "ok"] : ageDays(s) < 7 ? ["Nouveau", "trial"] : ["Inactif", "late"];
+const salonState = (s, a) => s.demo ? ["Démo", "trial"] : s.blocked ? ["Suspendu", "neg"] : !a ? ["…", "trial"] : a.tickets + a.rdv > 0 ? ["Actif", "ok"] : ageDays(s) < 7 ? ["Nouveau", "trial"] : ["Inactif", "late"];
 
 ROUTES.admin = () => {
   tabs("admin");
@@ -31,19 +32,27 @@ ROUTES.admin = () => {
     r.filter((s) => !(s.id in act)).forEach((s) => { act[s.id] = null; Store.activity(s.id, since).then((a) => { act[s.id] = a; paint(); }).catch(() => {}); });
   }, () => { $("#ad-list").innerHTML = `<p class="empty">Lecture impossible : vérifie que les règles Firebase sont à jour.</p>`; }));
   viewSubs.push(Store.watchErrors(Date.now() - 7 * 864e5, (r) => { errs = r; paint(); }));
-  $view.innerHTML = `<h1>Espace admin</h1><div id="ad-kpi"></div>
+  $view.innerHTML = `<h1>Espace admin</h1>
+    <div class="card"><h2>Mode présentation</h2><p class="small muted">Montre l'appli sur ton seul téléphone : tu passes de patron à coiffeur ou client avec la barre en haut de l'écran.</p><div id="ad-demo" class="stack"><p class="muted">Chargement…</p></div></div>
+    <div id="ad-kpi"></div>
     <div class="row" data-keep><input class="field" id="ad-q" placeholder="Chercher un salon, un quartier, un code" autocomplete="off"></div>
     <div class="chips" id="ad-f">${["tous", "actifs", "inactifs", "nouveaux", "suspendus"].map((f) => `<button type="button" class="chip" data-f="${f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join("")}</div>
     <div id="ad-list" class="list"><p class="muted">Chargement…</p></div>
-    <p class="small muted">Activité = tickets et rendez-vous des 7 derniers jours. Les recettes des salons restent privées.</p>
+    <p class="small muted">Activité = tickets et rendez-vous des 7 derniers jours. « Voir le salon » l'ouvre comme son patron le voit : tu peux tout regarder, mais pas modifier un salon qui n'est pas à toi.</p>
     <h2>Erreurs des 7 derniers jours</h2><div id="ad-err" class="list"></div>`;
+  const demos = () => Store.mySalons().then((m) => {
+    const el = $("#ad-demo"); if (!el) return;
+    el.innerHTML = m.map((s) => `<button class="line-btn" type="button" data-demo="${esc(s.id)}"><b>Présenter ${esc(s.name)}</b><span class="muted small">code ${esc(s.id)}</span></button>`).join("")
+      + (m.some((s) => s.demo) ? "" : `<button class="btn" type="button" id="ad-new-demo">Créer un salon de démonstration</button>`);
+  }).catch(() => {});
+  demos();
   $("#ad-q").oninput = (e) => { q = e.target.value.trim().toLowerCase(); paint(); };
   $("#ad-f").onclick = (e) => { const b = e.target.closest("[data-f]"); if (b) { filter = b.dataset.f; paint(); } };
   const keep = (s) => { const st = salonState(s, act[s.id])[0]; return filter === "tous" || (filter === "actifs" && st === "Actif") || (filter === "inactifs" && st === "Inactif") || (filter === "nouveaux" && st === "Nouveau") || (filter === "suspendus" && st === "Suspendu"); };
   function paint() {
     if (!$("#ad-list")) return;
     const n = (st) => rows.filter((s) => salonState(s, act[s.id])[0] === st).length;
-    $("#ad-kpi").innerHTML = `<div class="kpis"><div><b>${rows.length}</b><span>salons inscrits</span></div><div><b>${n("Actif")}</b><span>actifs cette semaine</span></div><div><b>${n("Inactif")}</b><span>inactifs</span></div><div><b>${errs.length}</b><span>erreurs (7 j)</span></div></div>`;
+    $("#ad-kpi").innerHTML = `<div class="kpis"><div><b>${rows.filter((s) => !s.demo).length}</b><span>salons inscrits</span></div><div><b>${n("Actif")}</b><span>actifs cette semaine</span></div><div><b>${n("Inactif")}</b><span>inactifs</span></div><div><b>${errs.length}</b><span>erreurs (7 j)</span></div></div>`;
     $$("#ad-f [data-f]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.f === filter));
     const list = rows.filter((s) => keep(s) && (!q || `${s.name} ${s.quartier || ""} ${s.id}`.toLowerCase().includes(q)));
     $("#ad-list").innerHTML = list.length ? list.map((s) => {
@@ -51,13 +60,19 @@ ROUTES.admin = () => {
       return `<div class="card ad-row" data-sid="${esc(s.id)}"><div class="head-row"><div><b>${esc(s.name)}</b> <span class="code small">${esc(s.id)}</span><br><span class="small muted">${esc(s.quartier || "")}${s.tel ? " · " + esc(s.tel) : ""} · inscrit le ${s.created ? new Date(s.created).toLocaleDateString("fr-FR") : "?"} · ${(s.coiffeurs || []).length} coiffeur(s)</span></div><span class="st st-${cls}">${st}</span></div>
         <span class="small">${a ? `${a.tickets} tickets, ${a.rdv} rendez-vous cette semaine${a.last ? " · dernier ticket " + dayLabel(a.last).toLowerCase() : ""}` : "Activité…"}${e ? ` · <b class="msg-ko">${e} erreur${e > 1 ? "s" : ""}</b>` : ""}</span>
         <div class="row"><button class="btn-ghost sm" type="button" data-ad="${s.blocked ? "unblock" : "block"}">${s.blocked ? "Réactiver" : "Suspendre"}</button>
-          ${s.tel ? `<a class="btn-ghost sm" target="_blank" rel="noopener" href="${waLink(s.tel, `Bonjour, ici l'équipe de l'appli Salon. `)}">WhatsApp</a>` : ""}<a class="btn-ghost sm" href="#page/${esc(s.id)}">Page</a></div></div>`;
+          ${s.tel ? `<a class="btn-ghost sm" target="_blank" rel="noopener" href="${waLink(s.tel, `Bonjour, ici l'équipe de l'appli Salon. `)}">WhatsApp</a>` : ""}<button class="btn sm" type="button" data-demo="${esc(s.id)}">Voir le salon</button></div></div>`;
     }).join("") : `<p class="empty">Aucun salon.</p>`;
     const names = Object.fromEntries(rows.map((s) => [s.id, s.name]));
     $("#ad-err").innerHTML = errs.length ? errs.map((x) => `<div class="card ad-row"><div class="head-row"><span class="small"><b>${esc(x.msg)}</b>${x.code ? ` <span class="code">${esc(x.code)}</span>` : ""}</span><button class="btn-ghost sm" type="button" data-er="${esc(x.id)}" aria-label="Effacer l'erreur">✕</button></div>
       <span class="small muted">${new Date(x.at).toLocaleString("fr-FR")} · ${x.sid ? esc(names[x.sid] || x.sid) : "sans salon"} · ${esc(x.role || "client")} · écran ${esc(x.route || "accueil")}<br>${esc(x.ua || "")}</span></div>`).join("") : `<p class="empty">Aucune erreur. Tout marche.</p>`;
   }
   $view.onclick = async (e) => {
+    const dm = e.target.closest("[data-demo]"); if (dm) return startDemo(dm.dataset.demo, "patron");
+    if (e.target.id === "ad-new-demo") {
+      e.target.disabled = true;
+      try { startDemo(await newDemoSalon(), "patron"); } catch (er) { e.target.disabled = false; toast("Création impossible. Vérifie le réseau."); }
+      return;
+    }
     const er = e.target.closest("[data-er]"); if (er) return Store.removeError(er.dataset.er).catch(() => toast("Effacement refusé."));
     const b = e.target.closest("[data-ad]"); if (!b) return;
     const s = rows.find((x) => x.id === b.closest("[data-sid]").dataset.sid); if (!s) return;
@@ -65,5 +80,36 @@ ROUTES.admin = () => {
     try {
       if (a === "block" || a === "unblock") { await Store.updateSalon(s.id, { blocked: a === "block" }); toast(a === "block" ? `${s.name} suspendu` : `${s.name} réactivé`); }
     } catch (er) { toast("Refusé : ce compte n'est pas admin dans les règles Firebase."); }
+  };
+};
+
+// ---------- Mode présentation : un salon de démonstration à soi, et une barre pour changer de rôle
+async function newDemoSalon() {
+  const sid = await Store.createSalon({ name: "Salon Démo", quartier: "Dakar", tel: "", open: true, demo: true, services: defaultServices(),
+    coiffeurs: ["Modou", "Ibou", "Pape"].map((n) => ({ id: uid(), name: n, pct: 40 })) });
+  // quelques clients déjà dans la file, pour que la démo ait l'air vivante
+  const s = await Store.getSalon(sid), day = dayOf(), u = await Store.ensureUser();
+  for (const name of ["Fallou", "Cheikh", "Moussa"]) {
+    const num = await Store.nextNumber(sid, day);
+    await Store.add(sid, "queue", { day, num, name, serviceId: s.services[num % s.services.length].id, coiffeurId: null, status: "attente", at: Date.now(), uid: u, express: false });
+  }
+  return sid;
+}
+async function startDemo(sid, role) {
+  ME.demo = sid;
+  if (role === "coiffeur" && !coifOf(ME.coiffeurId)) { const s = await Store.getSalon(sid).catch(() => null); ME.coiffeurId = ((s && s.coiffeurs) || [])[0]?.id || null; }
+  Object.assign(ME, { role, sid }); saveMe();
+  go(role === "client" ? "ticket/" + sid : "file");
+}
+window.demoBar = () => {
+  const bar = $("#demo-bar");
+  bar.hidden = !ME.demo || !isAdmin();
+  if (bar.hidden) return;
+  const cur = ME.role;
+  bar.innerHTML = `<span class="small">${ME.sid && LIVE.salon && LIVE.salon.owner !== Store.uid ? `Vue de <b>${esc(LIVE.salon.name)}</b>` : "Présentation"}</span>${[["patron", "Patron"], ["coiffeur", "Coiffeur"], ["client", "Client"]].map(([r, l]) => `<button type="button" class="chip sm" data-dr="${r}" aria-pressed="${cur === r}">${l}</button>`).join("")}<button type="button" class="btn-ghost sm" data-dr="fin" aria-label="Quitter la présentation">✕</button>`;
+  bar.onclick = (e) => {
+    const b = e.target.closest("[data-dr]"); if (!b) return;
+    if (b.dataset.dr === "fin") { Object.assign(ME, { demo: null, role: null, sid: null, coiffeurId: null }); saveMe(); return go("admin"); }
+    startDemo(ME.demo, b.dataset.dr);
   };
 };
