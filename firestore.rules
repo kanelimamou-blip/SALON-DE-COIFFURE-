@@ -10,6 +10,8 @@ service cloud.firestore {
     function staffDoc(sid) { return /databases/$(db)/documents/salons/$(sid)/staff/$(request.auth.uid); }
     function staff(sid) { return signed() && exists(staffDoc(sid)); }
     function team(sid) { return owner(sid) || staff(sid); }
+    // caisse et bilan ouverts pendant l'essai de 10 jours, puis seulement si l'abonnement est payé
+    function active(sid) { let s = salon(sid); return s.premiumUntil > request.time.toMillis() || s.created + duration.value(10, 'd') > request.time; }
 
     match /salons/{sid} {
       // la fiche du salon est publique : nom, coupes, prix, ouvert ou fermé
@@ -43,15 +45,15 @@ service cloud.firestore {
       }
       // un coiffeur ne voit que ses propres coupes (idée 66)
       match /ventes/{id} {
-        allow read, update, delete: if owner(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId);
-        allow create: if owner(sid) || (staff(sid) && request.resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId);
+        allow read, update, delete: if active(sid) && (owner(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
+        allow create: if active(sid) && (owner(sid) || (staff(sid) && request.resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
       }
       match /pointage/{id} {
         allow read: if true;
         allow write: if team(sid);
       }
-      match /depenses/{id} { allow read, write: if owner(sid); }
-      match /stock/{id} { allow read, write: if owner(sid); }
+      match /depenses/{id} { allow read, write: if owner(sid) && active(sid); }
+      match /stock/{id} { allow read, write: if owner(sid) && active(sid); }
       match /galerie/{id} { allow read: if true; allow write: if owner(sid); }
     }
 

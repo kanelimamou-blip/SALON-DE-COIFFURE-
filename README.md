@@ -11,19 +11,20 @@ Faite sur le modèle de l'appli [Révision](https://github.com/kanelimamou-blip/
 - **Catalogue** : coupes avec photo, prix et durée. Les durées servent à estimer l'attente selon les coiffeurs présents.
 - **Caisse** : une coupe encaissée en un geste (espèces, Wave ou Orange Money), totaux du jour et du mois, part de chaque coiffeur, dépenses, bénéfice du mois avec graphique, stock avec alerte, pointage des coiffeurs, QR Wave du salon affiché au client.
 - **Coiffeurs** : chacun relie son téléphone avec le code du salon et le code coiffeur. Il voit ses coupes et sa part, pas la recette du salon.
-- **Essai et abonnement** : 10 jours gratuits, puis 2 000 F par mois ou 20 000 F par an, payés par Wave ou Orange Money au 78 272 19 20. Le patron déclare son paiement dans l'appli et un admin le valide dans l'appli (Salon > Abonnement).
+- **Les profils** : patron, coiffeur, client et écran d'attente, tous ouverts depuis l'accueil.
+- **Essai et abonnement** : 10 jours gratuits, puis 2 000 F par mois ou 20 000 F par an, payés par Wave ou Orange Money au 78 272 19 20. Le patron déclare son paiement dans l'appli et un admin le valide dans l'appli (Salon > Abonnement). Après l'essai, les règles Firestore bloquent la caisse, les dépenses et le stock d'un salon non abonné, même en contournant l'appli.
 
 ## Fichiers
 
 - `docs/` : l'appli (HTML, CSS, JS sans outil de compilation), publiée sur GitHub Pages à chaque modification de `main`.
   - `config.js` : configuration Firebase, prix, numéro de paiement, admins.
-  - `store.js` : lecture et écriture des données (Firestore, ou le téléphone seul en mode démo).
+  - `store.js` : lecture et écriture des données dans Firestore, avec cache hors connexion.
   - `app.js` : les écrans.
 - `firestore.rules` : règles de sécurité à coller dans la console Firebase.
 
 ## Mise en ligne de Firebase
 
-Tant que `FIREBASE_CONFIG` vaut `null` dans `docs/config.js`, l'appli marche en mode démo : tout reste sur le téléphone. Pour que les clients voient la file depuis leur propre téléphone :
+L'appli est reliée au projet Firebase `salon-coiffure-f0ee4`. Pour la brancher sur un autre projet :
 
 1. Créer un projet sur https://console.firebase.google.com (plan gratuit Spark).
 2. Authentication : activer **Google**, **E-mail/Mot de passe** et **Anonyme**. Ajouter `kanelimamou-blip.github.io` aux domaines autorisés.

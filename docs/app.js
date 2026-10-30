@@ -214,14 +214,17 @@ ROUTES.accueil = () => {
         <div class="row"><input class="field" id="cli-code" maxlength="5" placeholder="Code (ex. K7P2Q)" autocapitalize="characters" autocomplete="off"><button class="btn">Entrer</button></div>
       </form>
     </div>
-    <div class="card demo"><p><b>Essayer sans rien créer</b><br><span class="muted small">Un salon d'exemple avec 3 coiffeurs, une file et un mois de caisse.</span></p><button class="btn alt" id="demo" type="button">Ouvrir le salon de démo</button></div>`;
+    <form class="role role-form" id="scr" data-keep>
+      <label for="scr-code"><b>Écran d'attente</b><span>Pour un vieux téléphone ou une télé laissés allumés dans le salon</span></label>
+      <div class="row"><input class="field" id="scr-code" maxlength="5" placeholder="Code du salon" autocapitalize="characters" autocomplete="off"><button class="btn alt">Afficher</button></div>
+    </form>`;
   $("#cli").onsubmit = (e) => { e.preventDefault(); const c = $("#cli-code").value.trim().toUpperCase(); if (c.length >= 4) go("ticket/" + c); };
-  $("#demo").onclick = () => { seedDemo(); Object.assign(ME, { role: "patron", sid: "DEMO1" }); saveMe(); go("file"); };
+  $("#scr").onsubmit = (e) => { e.preventDefault(); const c = $("#scr-code").value.trim().toUpperCase(); if (c.length >= 4) go("ecran/" + c); };
 };
 
 // ---------- Patron : connexion puis création du salon
 ROUTES.demarrer = async () => {
-  if (Store.cloud && !Store.isAccount()) {
+  if (!Store.isAccount()) {
     $view.innerHTML = `<h1>Mon compte patron</h1>
       <div class="card"><p>Ton compte garde les chiffres du salon, même si tu changes de téléphone.</p>
         <button class="btn" id="g" type="button">Continuer avec Google</button></div>
@@ -568,8 +571,8 @@ ROUTES.salon = () => {
       <div class="stepper"><button type="button" class="btn-ghost sm" data-d="-1" aria-label="Moins">−</button><b class="tab">${x.qty}</b><button type="button" class="btn-ghost sm" data-d="1" aria-label="Plus">+</button></div><button type="button" class="btn-ghost sm" data-rm="st" aria-label="Supprimer">✕</button></div>`).join("") : `<p class="empty">Ajoute tes produits (lames, crèmes, teintures) pour être prévenu quand il en manque.</p>`;
     $("#s-wave").innerHTML = `${s.waveQr ? `<img class="wave-img" src="${s.waveQr}" alt="QR Wave du salon"><a class="btn alt" href="#wave/${esc(ME.sid)}">Afficher en grand pour le client</a>` : ""}<label class="btn ${s.waveQr ? "btn-ghost" : "alt"}">${s.waveQr ? "Changer la photo" : "Prendre la photo du QR Wave"}<input type="file" accept="image/*" hidden id="wave-f"></label>`;
     $("#wave-f").onchange = async (e) => { const f = e.target.files[0]; if (f) { await Store.updateSalon(ME.sid, { waveQr: await shrink(f, 700, 0.8) }); toast("QR Wave enregistré"); } };
-    $("#s-me").innerHTML = `<p class="small muted">${Store.cloud ? `Compte : ${esc(Store.email || "")}<br>Identifiant : <code>${esc(Store.uid || "")}</code>` : "Mode démo : les données restent sur ce téléphone."}</p>
-      <div class="row"><button class="btn-ghost" type="button" id="me-sw">Changer de salon</button>${Store.cloud ? `<button class="btn-ghost" type="button" id="me-out">Se déconnecter</button>` : ""}</div>`;
+    $("#s-me").innerHTML = `<p class="small muted">Compte : ${esc(Store.email || "")}<br>Identifiant : <code>${esc(Store.uid || "")}</code></p>
+      <div class="row"><button class="btn-ghost" type="button" id="me-sw">Changer de salon</button><button class="btn-ghost" type="button" id="me-out">Se déconnecter</button></div>`;
     $("#me-sw").onclick = () => { Object.assign(ME, { role: null, sid: null }); saveMe(); go("accueil"); };
     const out = $("#me-out"); if (out) out.onclick = async () => { await Store.signOut(); Object.assign(ME, { role: null, sid: null }); saveMe(); go("accueil"); };
     tabs("salon");
@@ -634,7 +637,6 @@ ROUTES.abonnement = () => {
       $("#ab-pay").onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) { pay = b.dataset.v; refresh(); } };
       $("#ab-f").onsubmit = async (e) => {
         e.preventDefault();
-        if (!Store.cloud) { $("#ab-msg").textContent = "Mode démo : le paiement n'est pas envoyé."; return; }
         await Store.declarePayment({ sid: ME.sid, salon: s.name, plan, pay, amount: plan === "an" ? CFG.priceYear : CFG.priceMonth, tel: $("#ab-tel").value.trim() }).then(
           () => { $("#ab-msg").className = "small msg-ok"; $("#ab-msg").textContent = "Merci ! On vérifie ton paiement."; },
           () => { $("#ab-msg").className = "small msg-ko"; $("#ab-msg").textContent = "Envoi impossible. Vérifie le réseau."; });
@@ -677,6 +679,7 @@ ROUTES.ticket = (sid) => {
     const est = estimate(), w = waiting(), me = LIVE.queue.find((e) => e.id === mineId());
     const head = `<div class="t-head"><div><h1>${esc(s.name)}</h1><p class="muted small">${esc(s.quartier || "")}</p></div>
       <div class="lang" role="group" aria-label="Langue"><button type="button" data-l="fr" aria-pressed="${ME.lang === "fr"}">FR</button><button type="button" data-l="wo" aria-pressed="${ME.lang === "wo"}">WO</button></div></div>`;
+    const foot = isStaff() ? "" : `<button class="btn-ghost sm switch" type="button" id="t-switch">Changer de profil ou de salon</button>`;
     if (me && !["fini", "parti"].includes(me.status)) {
       const pos = w.findIndex((e) => e.id === me.id), mins = est[me.id] ?? 0;
       if (me.status === "appele" && lastStatus !== "appele") alertMe(t("C'est ton tour !"), t("Présente-toi au salon."));
@@ -690,7 +693,7 @@ ROUTES.ticket = (sid) => {
                <p>${t("Attente estimée")} : <b>${waitLabel(mins)}</b></p><p class="small">${t("Viens vers")} <b>${hm(Date.now() + Math.max(0, mins - 5) * 6e4)}</b></p>`}
           <span class="small">${esc(svcOf(me.serviceId).name)} · ${fcfa(svcOf(me.serviceId).price)}</span></div>
         ${me.status === "attente" ? `<div class="stack"><button class="btn alt" type="button" id="t-notif">${t("Me prévenir 10 minutes avant")}</button><button class="btn-ghost" type="button" id="t-cancel">${t("Je ne viens plus")}</button></div>` : ""}
-        ${s.waveQr ? `<a class="btn-ghost" href="#wave/${esc(sid)}">Payer avec Wave</a>` : ""}`;
+        ${s.waveQr ? `<a class="btn-ghost" href="#wave/${esc(sid)}">Payer avec Wave</a>` : ""}` + foot;
       const n = $("#t-notif"); if (n) n.onclick = async () => { if ("Notification" in window) { const r = await Notification.requestPermission(); toast(r === "granted" ? "Tu seras prévenu (garde la page ouverte)." : "Les notifications sont refusées sur ce téléphone."); } else toast("Garde cette page ouverte : le téléphone vibrera."); };
       const c = $("#t-cancel"); if (c) c.onclick = () => { Store.update(sid, "queue", me.id, { status: "parti" }); delete ME.tickets[sid]; saveMe(); };
     } else {
@@ -707,7 +710,7 @@ ROUTES.ticket = (sid) => {
           ${coiffeurs().length > 1 ? `<h2 class="sec">${t("Coiffeur")}</h2><div class="chips" id="t-coif"><button type="button" class="chip" data-c="" aria-pressed="${!choice.coif}">${t("Peu importe")}</button>${coiffeurs().map((c) => `<button type="button" class="chip" data-c="${esc(c.id)}" aria-pressed="${choice.coif === c.id}">${esc(c.name)}</button>`).join("")}</div>` : ""}
           <label class="lbl" for="t-name">${t("Ton prénom")}</label><input class="field" id="t-name" maxlength="30" required autocomplete="given-name" value="${esc(ME.name || "")}">
           <label class="lbl" for="t-tel">${t("Ton numéro (pour être prévenu)")}</label><input class="field" id="t-tel" inputmode="tel" maxlength="20" autocomplete="tel" value="${esc(ME.tel || "")}">
-          <button class="btn big">${t("Prendre mon ticket")}</button><p class="small" id="t-msg"></p></form>`) + `<a class="btn-ghost" href="#galerie/${esc(sid)}">${t("Nos réalisations")}</a>`;
+          <button class="btn big">${t("Prendre mon ticket")}</button><p class="small" id="t-msg"></p></form>`) + `<a class="btn-ghost" href="#galerie/${esc(sid)}">${t("Nos réalisations")}</a>` + foot;
       const f = $("#t-form");
       if (f) {
         $("#t-cat").onclick = (e) => { const b = e.target.closest("[data-s]"); if (!b) return; choice.svc = b.dataset.s; $$("#t-cat [data-s]").forEach((x) => x.setAttribute("aria-pressed", x === b)); };
@@ -728,6 +731,7 @@ ROUTES.ticket = (sid) => {
       }
     }
     $$("[data-l]").forEach((b) => (b.onclick = () => { ME.lang = b.dataset.l; saveMe(); refresh(); }));
+    const sw = $("#t-switch"); if (sw) sw.onclick = () => { Object.assign(ME, { role: null, sid: null }); saveMe(); go("accueil"); };
   };
   idle = setInterval(refresh, 30000);
   refresh();
@@ -749,7 +753,9 @@ ROUTES.ecran = (sid) => {
   try { navigator.wakeLock && navigator.wakeLock.request("screen").then((w) => { wake = w; }, () => {}); } catch (e) {}
   $view.innerHTML = `<div class="screen" id="e-body"></div>`;
   refreshFn = () => {
-    const s = LIVE.salon; if (!s) return;
+    const s = LIVE.salon;
+    if (s === null && LIVE.sid === sid) { $("#e-body").innerHTML = `<h1>Salon introuvable</h1><p>Vérifie le code du salon.</p><a class="btn alt" href="#accueil">Retour</a>`; return; }
+    if (!s) return;
     const est = estimate(), w = waiting(), ch = inChair(), called = w.filter((e) => e.status === "appele");
     $("#e-body").innerHTML = `<header><b>${esc(s.name)}</b><span class="clock">${hm(Date.now())}</span><div class="lang" role="group" aria-label="Langue"><button type="button" data-l="fr" aria-pressed="${ME.lang === "fr"}">FR</button><button type="button" data-l="wo" aria-pressed="${ME.lang === "wo"}">WO</button></div></header>
       <div class="sc-grid"><div>
@@ -799,34 +805,6 @@ ROUTES.wave = (sid) => {
   };
   refresh();
 };
-
-// ---------- Salon de démo
-function seedDemo() {
-  let r = 7; const rnd = () => ((r = (r * 9301 + 49297) % 233280) / 233280);
-  const sv = [["Dégradé", 1500, 25], ["Boule à zéro", 1000, 15], ["Barbe", 500, 10], ["Coupe et barbe", 2000, 35], ["Teinture", 2500, 40], ["Coupe enfant", 1000, 20]].map(([name, price, dur], i) => ({ id: "s" + i, name, price, dur, photo: "" }));
-  const co = [{ id: "c1", name: "Modou", pct: 40 }, { id: "c2", name: "Ibou", pct: 40 }, { id: "c3", name: "Pape", pct: 30 }];
-  const now = new Date(), today = dayOf(), month = today.slice(0, 7), ventes = {}, depenses = {};
-  for (let d = 1; d <= now.getDate(); d++) {
-    const day = `${month}-${pad(d)}`, n = d === now.getDate() ? 7 : 8 + Math.floor(rnd() * 10) + (new Date(day).getDay() === 6 ? 6 : 0);
-    for (let i = 0; i < n; i++) {
-      const s = sv[[0, 0, 0, 1, 2, 3, 3, 4, 5][Math.floor(rnd() * 9)]];
-      ventes["v" + d + "_" + i] = { day, at: new Date(day + "T09:00").getTime() + i * 40 * 6e4, serviceId: s.id, name: s.name, price: s.price, coiffeurId: co[Math.floor(rnd() * 3)].id, pay: rnd() < 0.6 ? "cash" : rnd() < 0.7 ? "wave" : "om", by: "demo" };
-    }
-  }
-  [["01", "Loyer", 60000, ""], ["03", "Électricité", 14500, "Woyofal"], ["05", "Lames", 3000, "2 boîtes"], ["12", "Produits", 8500, "Crèmes et gel"], ["19", "Lames", 3000, ""]].forEach(([d, cat, amount, note], i) => {
-    if (+d <= now.getDate()) depenses["d" + i] = { day: `${month}-${d}`, at: 0, cat, amount, note };
-  });
-  const t0 = Date.now();
-  const q = [[1, "Cheikh", "s0", "c1", "fini"], [2, "Babacar", "s3", "c2", "fini"], [3, "Ousmane", "s0", "c1", "fauteuil"], [4, "Aliou", "s2", "c2", "fauteuil"], [5, "Mamadou", "s0", null, "attente"], [6, "Serigne", "s3", "c1", "attente"], [7, "Lamine", "s5", null, "attente"], [8, "Khadim", "s1", null, "attente"]];
-  const queue = Object.fromEntries(q.map(([num, name, serviceId, coiffeurId, status], i) => ["q" + num, { day: today, num, name, serviceId, coiffeurId, status, at: t0 - (60 - i * 6) * 6e4, startedAt: status === "fauteuil" ? t0 - (8 + i) * 6e4 : null, uid: "demo", walkin: i % 2 === 0 }]));
-  Store._seed("DEMO1", {
-    doc: { name: "Salon Teranga (démo)", quartier: "Médina, Dakar", tel: "", open: true, services: sv, coiffeurs: co, owner: Store.uid, created: Date.now(), premiumUntil: 0 },
-    private: { config: { staffCode: "DEMO" } },
-    queue, ventes, depenses, meta: { counter: { day: today, n: 8 } }, contacts: {},
-    stock: { k1: { name: "Lames", qty: 3, min: 5 }, k2: { name: "Gel", qty: 6, min: 2 }, k3: { name: "Teinture noire", qty: 2, min: 2 }, k4: { name: "Alcool", qty: 4, min: 1 } },
-    pointage: { [today + "_c1"]: { day: today, coiffeurId: "c1", in: t0 - 3 * 36e5, out: null }, [today + "_c2"]: { day: today, coiffeurId: "c2", in: t0 - 2 * 36e5, out: null } },
-  });
-}
 
 // ---------- Installation sur l'écran d'accueil et démarrage
 let installEvt = null;

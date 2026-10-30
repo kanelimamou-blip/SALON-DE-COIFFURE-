@@ -2,7 +2,6 @@
 // Réglages de l'appli Salon. Modifier ici, puis publier.
 
 // Configuration publique du projet Firebase (pas secrète : la sécurité vient de firestore.rules).
-// Si elle vaut null, l'appli marche en mode démo : tout reste sur le téléphone.
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDIeME3QSYUJijIb3YChFAW2eXOTrqF0q4",
   authDomain: "salon-coiffure-f0ee4.firebaseapp.com",
