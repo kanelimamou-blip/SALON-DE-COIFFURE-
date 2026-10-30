@@ -288,3 +288,8 @@ a.dir{color:var(--ink);text-decoration:none}
 .ad-tabs button{min-height:48px;border:0;border-radius:12px;background:var(--surface-2);color:var(--ink);font:inherit;font-weight:700;cursor:pointer}
 .ad-tabs button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
 .install-card{border:2px solid var(--accent);margin-bottom:16px}
+/* guide du premier démarrage */
+.guide{border:2px solid var(--blue);margin-bottom:12px}
+.guide-step{display:flex !important;flex-direction:row !important;align-items:center;gap:12px;text-align:left}
+.guide-step b{flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--blue-soft);color:var(--blue)}
+.guide-step.done{opacity:.6}.guide-step.done b{background:var(--ok-soft);color:var(--ok)}

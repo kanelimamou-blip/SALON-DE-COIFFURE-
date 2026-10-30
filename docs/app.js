@@ -219,16 +219,11 @@ ROUTES.accueil = () => {
       <form class="role role-form" id="cli" data-keep>
         <label for="cli-code"><b>Je suis client</b><span>Entre le code du salon ou scanne son QR code</span></label>
         <div class="row"><input class="field" id="cli-code" maxlength="5" placeholder="Code (ex. K7P2Q)" autocapitalize="characters" autocomplete="off"><button class="btn">Entrer</button></div>
+        <a class="small" href="#annuaire">Pas de code ? Trouve un salon près de toi</a>
       </form>
     </div>
-    <a class="role" href="#annuaire"><b>Trouver un salon</b><span>Les salons du quartier, l'attente en direct et les prix</span></a>
-    <form class="role role-form" id="scr" data-keep>
-      <label for="scr-code"><b>Écran d'attente</b><span>Pour un vieux téléphone ou une télé laissés allumés dans le salon</span></label>
-      <div class="row"><input class="field" id="scr-code" maxlength="5" placeholder="Code du salon" autocapitalize="characters" autocomplete="off"><button class="btn alt">Afficher</button></div>
-    </form>
     <p class="small" style="text-align:center"><a class="muted" href="#admin">Espace propriétaire de l'appli</a></p>`;
   $("#cli").onsubmit = (e) => { e.preventDefault(); const c = $("#cli-code").value.trim().toUpperCase(); if (c.length >= 4) go("ticket/" + c); };
-  $("#scr").onsubmit = (e) => { e.preventDefault(); const c = $("#scr-code").value.trim().toUpperCase(); if (c.length >= 4) go("ecran/" + c); };
 };
 
 // ---------- Invitation d'un nouveau patron (lien ou QR code créé dans l'espace admin) : son salon est prérempli
@@ -300,13 +295,15 @@ const defaultServices = () => [
 ].map(([name, price, dur]) => ({ id: uid(), name, price, dur, photo: "" }));
 
 // ---------- Coiffeur : relier son téléphone au salon
-ROUTES.rejoindre = () => {
+ROUTES.rejoindre = (arg) => {
   $view.innerHTML = `<h1>Rejoindre mon salon</h1>
     <form class="card" id="j" data-keep>
       <p class="small muted">Demande au patron le code du salon et le code coiffeur (dans Salon, rubrique Coiffeurs).</p>
       <label class="lbl" for="j-sid">Code du salon</label><input class="field" id="j-sid" maxlength="5" autocapitalize="characters" required placeholder="Ex. K7P2Q">
       <label class="lbl" for="j-code">Code coiffeur</label><input class="field" id="j-code" maxlength="4" autocapitalize="characters" required placeholder="Ex. 4XRT">
       <button class="btn">Continuer</button><p class="small" id="j-msg"></p></form><div id="j-who"></div>`;
+  // lien du QR code affiché par le patron : les deux codes sont déjà remplis
+  const [qs, qc] = (arg || "").toUpperCase().split("-");
   $("#j").onsubmit = async (e) => {
     e.preventDefault();
     const sid = $("#j-sid").value.trim().toUpperCase(), code = $("#j-code").value.trim().toUpperCase();
@@ -316,14 +313,25 @@ ROUTES.rejoindre = () => {
     $("#j-who").innerHTML = `<div class="card"><h2>Qui es-tu ?</h2><div class="chips">${s.coiffeurs.map((c) => `<button class="chip" type="button" data-c="${esc(c.id)}">${esc(c.name)}</button>`).join("")}</div></div>`;
     $$("#j-who [data-c]").forEach((b) => (b.onclick = () => Store.joinStaff(sid, code, b.dataset.c).then(() => {
       Object.assign(ME, { role: "coiffeur", sid, coiffeurId: b.dataset.c }); saveMe(); toast("Bienvenue " + b.textContent); go("file");
-    }, () => { $("#j-msg").className = "small msg-ko"; $("#j-msg").textContent = "Le code coiffeur ne correspond pas."; })));
+    }, () => { $("#j-msg").className = "small msg-ko"; $("#j-msg").textContent = "Le code coiffeur ne correspond pas. Demande au patron de te montrer le QR code à jour."; })));
   };
+  if (qs && qc) { $("#j-sid").value = qs; $("#j-code").value = qc; $("#j").requestSubmit(); }
 };
+
+// ---------- Premier démarrage du patron : 3 étapes, cochées quand il les touche
+const GUIDE = [["svc", "Vérifie tes coupes et tes prix", "salon/d-svc"], ["qr", "Télécharge l'affiche QR et colle-la dans le salon", "salon/d-qr"], ["coif", "Relie le téléphone de tes coiffeurs", "salon/d-coif"]];
+function guideCard(s) {
+  const g = s.guide || {};
+  if (ME.role !== "patron" || s.owner !== Store.uid || g.off || GUIDE.every(([k]) => g[k])) return "";
+  const n = GUIDE.filter(([k]) => g[k]).length;
+  return `<div class="card guide"><div class="head-row"><h2>Pour bien démarrer · ${n}/3</h2><button type="button" class="btn-ghost sm" data-g="off">Masquer</button></div>
+    ${GUIDE.map(([k, l, to], i) => `<button type="button" class="line-btn guide-step${g[k] ? " done" : ""}" data-g="${k}" data-to="${to}"><b>${g[k] ? "✓" : i + 1}</b><span>${l}</span></button>`).join("")}</div>`;
+}
 
 // ---------- File d'attente (patron et coiffeurs)
 ROUTES.file = () => {
   if (ME.role === "patron" && LIVE.salon && LIVE.salon.simple) return go("caisse");
-  $view.innerHTML = `<div id="f-head"></div>
+  $view.innerHTML = `<div id="f-guide"></div><div id="f-head"></div>
     <details class="card add" id="f-add-box"><summary>Ajouter un client arrivé au salon</summary>
       <form id="f-add" data-keep>
         <input class="field" id="a-name" maxlength="30" placeholder="Prénom du client" required>
@@ -345,9 +353,16 @@ ROUTES.file = () => {
     await Store.add(ME.sid, "queue", { day: dayOf(), num, name, serviceId: $("#a-svc").value, coiffeurId: $("#a-coif").value || null, status: "attente", at: Date.now(), uid: Store.uid, walkin: true });
     $("#a-name").value = ""; $("#f-add-box").open = false; toast(`Ticket n° ${num} pour ${name}`);
   };
+  $("#f-guide").onclick = (e) => {
+    const b = e.target.closest("[data-g]"); if (!b) return;
+    const g = { ...(LIVE.salon.guide || {}), [b.dataset.g]: true };
+    Store.updateSalon(ME.sid, { guide: g }).catch(() => {});
+    if (b.dataset.to) go(b.dataset.to);
+  };
   refreshFn = () => {
     const s = LIVE.salon; if (!s) { $("#f-head").innerHTML = `<p class="muted">Chargement…</p>`; return; }
     if (ME.role === "patron" && s.simple) return go("caisse");
+    $("#f-guide").innerHTML = guideCard(s);
     if (!$("#a-svc").options.length) fillSelects();
     const est = estimate(), w = waiting(), last = est._next;
     $("#f-head").innerHTML = `<div class="head-row"><div><h1>${esc(s.name)}</h1><p class="muted small">Code du salon <b class="code">${esc(s.id)}</b></p></div>
@@ -545,7 +560,7 @@ function chart(month, V, D) {
 }
 
 // ---------- Réglages du salon (patron)
-ROUTES.salon = () => {
+ROUTES.salon = (part) => {
   if (ME.role !== "patron") return go("file");
   $view.innerHTML = `<p class="muted">Chargement…</p>`;
   let built = false;
@@ -555,9 +570,9 @@ ROUTES.salon = () => {
       built = true;
       $view.innerHTML = `<div id="s-root" class="stack-l"><h1>Salon</h1>
         <div class="quick"><a class="btn alt" href="#clients">Mes clients</a><a class="btn alt" href="#offres">Offres de fêtes</a><a class="btn alt" href="#page/${esc(ME.sid)}">Page du salon</a><a class="btn alt" href="#demarrer">Mes salons</a></div>
-        <details class="card" open><summary><h2>QR code et écran d'attente</h2></summary><div id="s-qr"></div></details>
-        <details class="card"><summary><h2>Coupes et prix</h2></summary><div id="s-svc" class="list"></div><button class="btn alt" type="button" id="svc-add">Ajouter une coupe</button></details>
-        <details class="card"><summary><h2>Coiffeurs et pointage</h2></summary><div id="s-coif"></div><h3>Aujourd'hui</h3><div id="s-pt"></div><div id="s-code"></div></details>
+        <details class="card" id="d-qr" open><summary><h2>QR code et écran d'attente</h2></summary><div id="s-qr"></div></details>
+        <details class="card" id="d-svc"><summary><h2>Coupes et prix</h2></summary><div id="s-svc" class="list"></div><button class="btn alt" type="button" id="svc-add">Ajouter une coupe</button></details>
+        <details class="card" id="d-coif"><summary><h2>Coiffeurs et pointage</h2></summary><div id="s-coif"></div><h3>Aujourd'hui</h3><div id="s-pt"></div><div id="s-code"></div></details>
         <details class="card"><summary><h2>Stock de produits <span id="s-stock-b"></span></h2></summary><div id="s-stock" class="list"></div>
           <form class="row" id="st-add" data-keep><input class="field" id="st-name" maxlength="30" placeholder="Produit (ex. Lames)" required><input class="field num-f" id="st-min" inputmode="numeric" placeholder="Alerte à" aria-label="Quantité minimale avant alerte"><button class="btn alt">Ajouter</button></form></details>
         <details class="card"><summary><h2>Galerie des réalisations</h2></summary><p class="small muted">Photos de belles coupes faites au salon. Les clients les voient sur la page du salon et peuvent les partager.</p><div id="s-gal" class="gal"></div><label class="btn alt">Ajouter une photo<input type="file" accept="image/*" hidden id="gal-f"></label></details>
@@ -591,6 +606,8 @@ ROUTES.salon = () => {
       $("#gal-f").onchange = async (e) => { const f = e.target.files[0]; if (f) { await Store.add(ME.sid, "galerie", { at: Date.now(), img: await shrink(f, 640, 0.6) }); e.target.value = ""; toast("Photo ajoutée"); } };
       $("#s-gal").onclick = (e) => { const b = e.target.closest("[data-gd]"); if (b) Store.remove(ME.sid, "galerie", b.dataset.gd); };
       viewSubs.push(Store.watch(ME.sid, "galerie", [], (rows) => { const el = $("#s-gal"); if (el) el.innerHTML = rows.sort((a, b) => b.at - a.at).map((g) => `<figure><img src="${g.img}" alt="Réalisation du salon"><button type="button" class="btn-ghost sm" data-gd="${esc(g.id)}" aria-label="Supprimer la photo">✕</button></figure>`).join("") || `<p class="empty">Aucune photo pour le moment.</p>`; }));
+      // #salon/d-svc, #salon/d-qr, #salon/d-coif : ouvre directement la rubrique (guide du premier démarrage)
+      const d = part && $("#" + part); if (d) { d.open = true; setTimeout(() => d.scrollIntoView({ block: "start" })); }
     }
     const fi = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v || ""; };
     fi("#i-name", s.name); fi("#i-q", s.quartier); fi("#i-tel", s.tel); fi("#i-open", s.ouverture || "09:00"); fi("#i-close", s.fermeture || "21:00"); fi("#i-hor", s.horaires);
@@ -619,8 +636,14 @@ ROUTES.salon = () => {
     if (!$("#s-code").dataset.done) {
       $("#s-code").dataset.done = 1;
       const c = await Store.staffCode(ME.sid).catch(() => "");
-      $("#s-code").innerHTML = `<div class="banner plain"><span>Pour qu'un coiffeur utilise son téléphone : code du salon <b class="code">${esc(ME.sid)}</b>, code coiffeur <b class="code" id="sc">${esc(c)}</b>. Il voit ses coupes, pas la recette du salon.</span><button class="btn-ghost sm" type="button" id="sc-new">Changer le code</button></div>`;
-      $("#sc-new").onclick = async () => { $("#sc").textContent = await Store.newStaffCode(ME.sid); toast("Nouveau code coiffeur"); };
+      const paint = (code) => {
+        $("#s-code").innerHTML = `<div class="qr-box"><div class="qr-print">${qrSvg(`${baseUrl()}#rejoindre/${ME.sid}-${code}`, 180)}<span>Coiffeur : scanne pour relier ton téléphone</span></div>
+          <div class="stack"><p class="small">Le coiffeur scanne ce QR code avec son téléphone, puis touche son prénom. Il voit ses coupes, pas la recette du salon.</p>
+          <p class="small muted">Sans QR : code du salon <b class="code">${esc(ME.sid)}</b>, code coiffeur <b class="code">${esc(code)}</b>.</p>
+          <button class="btn-ghost sm" type="button" id="sc-new">Changer le code (l'ancien QR ne marchera plus)</button></div></div>`;
+        $("#sc-new").onclick = async () => { paint(await Store.newStaffCode(ME.sid)); toast("Nouveau code coiffeur"); };
+      };
+      paint(c);
     }
     const low = LIVE.stock.filter((x) => x.qty <= (x.min || 0));
     $("#s-stock-b").innerHTML = low.length ? `<i class="badge">${low.length}</i>` : "";

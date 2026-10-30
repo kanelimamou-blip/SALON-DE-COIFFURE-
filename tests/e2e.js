@@ -69,12 +69,21 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   check((await txt(pat, '#cl-list')).includes('Fallou'), 'fiche client de Fallou créée');
 
   // 7. Un coiffeur rejoint le salon et ne voit que ses coupes
-  await pat.goto(U + '#salon'); await W(pat, 3000);
-  const code = (await pat.textContent('#sc')).trim();
-  const coi = await phone('coiffeur'); await coi.goto(U + '#rejoindre'); await W(coi, 2500);
-  await coi.fill('#j-sid', sid); await coi.fill('#j-code', code); await coi.click('#j .btn'); await W(coi, 3000);
+  // le patron montre le QR code, le coiffeur le scanne : les codes sont déjà remplis
+  await pat.goto(U + '#file'); await W(pat, 2500);
+  check((await txt(pat, '#f-guide')).includes('Pour bien démarrer · 0/3'), 'patron : guide du premier démarrage affiché');
+  await pat.click('#f-guide [data-g="coif"]'); await W(pat, 3000);
+  check(pat.url().endsWith('#salon/d-coif') && await pat.evaluate(() => document.getElementById('d-coif').open), 'guide : ouvre la rubrique Coiffeurs');
+  check(await pat.isVisible('#s-code svg'), 'patron : QR code pour relier un coiffeur');
+  const code = await pat.evaluate(() => document.querySelectorAll('#s-code b.code')[1].textContent.trim());
+  const coi = await phone('coiffeur'); await coi.goto(U + '#rejoindre/' + sid + '-' + code); await W(coi, 3500);
+  check(await coi.isVisible('#j-who [data-c]'), 'coiffeur : QR scanné, il n\'a plus qu\'à toucher son prénom');
   await coi.click('#j-who [data-c]:nth-child(2)'); await W(coi, 3000);
   await coi.goto(U + '#caisse'); await W(coi, 3000);
+  await pat.goto(U + '#file'); await W(pat, 2500);
+  check((await txt(pat, '#f-guide')).includes('1/3'), 'guide : étape cochée (1/3)');
+  await pat.click('#f-guide [data-g="off"]'); await W(pat, 2000);
+  check((await txt(pat, '#f-guide')) === '', 'guide : masqué');
   check((await txt(coi, 'main')).includes('Mes coupes'), 'coiffeur : page « Mes coupes » ouverte');
   await coi.click('#c-svc [data-s]'); await W(coi, 2500);
   check((await txt(coi, '#c-tot')).includes('1 500 F'), 'coiffeur : sa coupe encaissée');
