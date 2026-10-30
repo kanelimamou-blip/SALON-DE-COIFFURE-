@@ -16,5 +16,5 @@ const CFG = {
   // Comptes qui ouvrent l'espace admin (#admin) : identifiant affiché sur cette page, à copier ici
   // et à la place de UID_ADMIN dans firestore.rules.
   // Le paiement de l'abonnement se fait hors de l'appli ; l'espace admin sert à superviser et à suspendre un salon
-  admins: [],
+  admins: ["tBGAaRZCZjhVm5gkb414ObcF7Cf2"],
 };

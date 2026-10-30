@@ -1,10 +1,10 @@
 rules_version = '2';
 // Règles à coller dans la console Firebase (Firestore > Règles) du projet de l'appli Salon.
-// Remplacer UID_ADMIN par l'identifiant affiché sur la page #admin de l'appli (compte du propriétaire de l'appli).
+// L'identifiant dans admin() est celui du compte du propriétaire de l'appli (affiché sur la page #admin).
 service cloud.firestore {
   match /databases/{db}/documents {
     function signed() { return request.auth != null; }
-    function admin() { return signed() && request.auth.uid in ['UID_ADMIN']; }
+    function admin() { return signed() && request.auth.uid in ['tBGAaRZCZjhVm5gkb414ObcF7Cf2']; }
     function salon(sid) { return get(/databases/$(db)/documents/salons/$(sid)).data; }
     function owner(sid) { return signed() && salon(sid).owner == request.auth.uid; }
     function staffDoc(sid) { return /databases/$(db)/documents/salons/$(sid)/staff/$(request.auth.uid); }

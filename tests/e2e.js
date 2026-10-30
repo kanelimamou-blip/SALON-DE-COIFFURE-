@@ -8,7 +8,7 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   // compte admin créé d'avance dans l'émulateur, puis ajouté aux règles et à l'appli
   const su = await (await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: `admin${Date.now()}@test.sn`, password: 'admin123', returnSecureToken: true }) })).json();
   const ADMIN = { uid: su.localId, email: su.email };
-  fs.writeFileSync(__dirname + '/regles-test.rules', fs.readFileSync(__dirname + '/../firestore.rules', 'utf8').replace("['UID_ADMIN']", `['${ADMIN.uid}']`));
+  fs.writeFileSync(__dirname + '/regles-test.rules', fs.readFileSync(__dirname + '/../firestore.rules', 'utf8').replace(/function admin\(\) \{[^}]*\}/, `function admin() { return signed() && request.auth.uid in ['${ADMIN.uid}']; }`));
   await new Promise((ok) => setTimeout(ok, 5000));   // l'émulateur recharge les règles
   const b = await chromium.launch();
   const errs = [];
@@ -17,7 +17,7 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
     await ctx.addInitScript(() => { window.SALON_EMU = true; });
     await ctx.route('https://www.gstatic.com/firebasejs/**', (r) => r.fulfill({ body: fs.readFileSync(NM + r.request().url().split('/').pop(), 'utf8'), contentType: 'text/javascript' }));
     await ctx.route('**/sw.js', (r) => r.fulfill({ status: 404, body: '' }));
-    await ctx.route('**/config.js', async (r) => r.fulfill({ body: fs.readFileSync(__dirname + '/../docs/config.js', 'utf8').replace('admins: []', `admins: ["${ADMIN.uid}"]`), contentType: 'text/javascript' }));
+    await ctx.route('**/config.js', async (r) => r.fulfill({ body: fs.readFileSync(__dirname + '/../docs/config.js', 'utf8').replace(/admins: \[[^\]]*\]/, `admins: ["${ADMIN.uid}"]`), contentType: 'text/javascript' }));
     const p = await ctx.newPage();
     p.on('pageerror', (e) => { if (!/Erreur de test/.test(e.message)) errs.push(name + ': ' + e.message); });
     p.on('console', (m) => { if (m.type() === 'error' && !/favicon|fonts|404/.test(m.text())) errs.push(name + ' console: ' + m.text()); });
