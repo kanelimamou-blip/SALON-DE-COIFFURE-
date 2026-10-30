@@ -13,6 +13,8 @@
 
 const Store = (() => {
   const cloud = !!FIREBASE_CONFIG;
+  // le salon de démo reste toujours sur le téléphone, même en ligne
+  const C = (sid) => cloud && sid !== "DEMO1";
   const rid = () => Array.from(crypto.getRandomValues(new Uint8Array(10)), (x) => "abcdefghijkmnpqrstuvwxyz23456789"[x % 32]).join("");
   const code = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (x) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[x % 32]).join("");
   const match = (o, where) => (where || []).every(([f, op, v]) => op === "==" ? o[f] === v : op === ">=" ? o[f] >= v : op === "<=" ? o[f] <= v : true);
@@ -93,15 +95,15 @@ const Store = (() => {
   }
 
   function watchSalon(sid, cb, err) {
-    if (!cloud) return lwatch(() => { const d = L(sid).doc; cb(d ? { id: sid, ...d } : null); });
+    if (!C(sid)) return lwatch(() => { const d = L(sid).doc; cb(d ? { id: sid, ...d } : null); });
     return S(sid).onSnapshot((d) => cb(d.exists ? fromDoc(d) : null), err || (() => cb(null)));
   }
   async function getSalon(sid) {
-    if (!cloud) { const d = L(sid).doc; return d ? { id: sid, ...d } : null; }
+    if (!C(sid)) { const d = L(sid).doc; return d ? { id: sid, ...d } : null; }
     const d = await S(sid).get(); return d.exists ? fromDoc(d) : null;
   }
   async function updateSalon(sid, patch) {
-    if (!cloud) { Object.assign(L(sid).doc, patch); commit(); return; }
+    if (!C(sid)) { Object.assign(L(sid).doc, patch); commit(); return; }
     await S(sid).update(patch);
   }
   async function mySalons() {
@@ -112,37 +114,37 @@ const Store = (() => {
   }
 
   function watch(sid, col, where, cb, err) {
-    if (!cloud) return lwatch(() => cb(Object.entries(Lcol(sid, col)).map(([id, o]) => ({ id, ...o })).filter((o) => match(o, where))));
+    if (!C(sid)) return lwatch(() => cb(Object.entries(Lcol(sid, col)).map(([id, o]) => ({ id, ...o })).filter((o) => match(o, where))));
     let q = S(sid).collection(col);
     (where || []).forEach(([f, op, v]) => { q = q.where(f, op, v); });
     return q.onSnapshot((snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), err || (() => {}));
   }
   async function add(sid, col, obj) {
-    if (!cloud) { const id = rid(); Lcol(sid, col)[id] = obj; commit(); return id; }
+    if (!C(sid)) { const id = rid(); Lcol(sid, col)[id] = obj; commit(); return id; }
     const ref = S(sid).collection(col).doc();
     ref.set(obj).catch(() => {});   // sans attendre : hors connexion, l'écriture part plus tard
     return ref.id;
   }
   async function set(sid, col, id, obj) {
-    if (!cloud) { Lcol(sid, col)[id] = obj; commit(); return; }
+    if (!C(sid)) { Lcol(sid, col)[id] = obj; commit(); return; }
     return S(sid).collection(col).doc(id).set(obj);
   }
   async function update(sid, col, id, patch) {
-    if (!cloud) { Object.assign(Lcol(sid, col)[id] || {}, patch); commit(); return; }
+    if (!C(sid)) { Object.assign(Lcol(sid, col)[id] || {}, patch); commit(); return; }
     S(sid).collection(col).doc(id).update(patch).catch(() => {});
   }
   async function remove(sid, col, id) {
-    if (!cloud) { delete Lcol(sid, col)[id]; commit(); return; }
+    if (!C(sid)) { delete Lcol(sid, col)[id]; commit(); return; }
     S(sid).collection(col).doc(id).delete().catch(() => {});
   }
   async function getDoc(sid, col, id) {
-    if (!cloud) { const o = Lcol(sid, col)[id]; return o ? { id, ...o } : null; }
+    if (!C(sid)) { const o = Lcol(sid, col)[id]; return o ? { id, ...o } : null; }
     const d = await S(sid).collection(col).doc(id).get(); return d.exists ? { id, ...d.data() } : null;
   }
 
   // Numéro de ticket du jour, sans doublon même si deux clients le prennent en même temps
   async function nextNumber(sid, day) {
-    if (!cloud) { const m = Lcol(sid, "meta"); const c = m.counter && m.counter.day === day ? m.counter.n + 1 : 1; m.counter = { day, n: c }; commit(); return c; }
+    if (!C(sid)) { const m = Lcol(sid, "meta"); const c = m.counter && m.counter.day === day ? m.counter.n + 1 : 1; m.counter = { day, n: c }; commit(); return c; }
     const ref = S(sid).collection("meta").doc("counter");
     return db.runTransaction(async (t) => {
       const d = await t.get(ref);
@@ -156,7 +158,7 @@ const Store = (() => {
   // Un coiffeur relie son téléphone au salon avec le code donné par le patron
   async function joinStaff(sid, codeIn, coiffeurId) {
     const uid = await ensureUser();
-    if (!cloud) { if (codeIn !== (await staffCode(sid))) throw new Error("code"); return set(sid, "staff", uid, { coiffeurId, code: codeIn }); }
+    if (!C(sid)) { if (codeIn !== (await staffCode(sid))) throw new Error("code"); return set(sid, "staff", uid, { coiffeurId, code: codeIn }); }
     await S(sid).collection("staff").doc(uid).set({ coiffeurId, code: codeIn });
   }
 
@@ -183,6 +185,6 @@ const Store = (() => {
     watch, add, set, update, remove, getDoc, nextNumber,
     staffCode, newStaffCode, joinStaff, declarePayment, watchPayments, validatePayment,
     // démo : remplit un salon d'exemple
-    _seed(sid, all) { if (cloud) return; load(); mem[sid] = all; commit(); },
+    _seed(sid, all) { load(); mem[sid] = all; commit(); },
   };
 })();
