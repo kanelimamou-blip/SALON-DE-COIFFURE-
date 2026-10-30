@@ -180,6 +180,7 @@ function render() {
   if (isStaff() && ME.sid) follow(ME.sid, ME.role);
   tabs(route);
   if (window.demoBar) demoBar();
+  $("#adm-link").hidden = !(typeof isAdmin === "function" && isAdmin()) || route === "admin";
   ROUTES[route](arg ? decodeURIComponent(arg) : "");
   $view.focus({ preventScroll: true });
   window.scrollTo(0, 0);
@@ -201,6 +202,8 @@ function tabs(route) {
 
 // ---------- Accueil : choisir son rôle
 ROUTES.accueil = () => {
+  // le propriétaire de l'appli arrive directement sur son espace admin
+  if (typeof isAdmin === "function" && isAdmin() && !ME.role) return go("admin");
   if (ME.role === "client" && ME.sid) return go("ticket/" + ME.sid);
   if (isStaff() && ME.sid) return go("file");
   if (ME.role === "client" && !ME.sid) ME.role = null;
@@ -211,7 +214,7 @@ ROUTES.accueil = () => {
       <p class="muted">Le client sait quand c'est son tour. Le patron sait combien rapporte chaque coiffeur.</p>
     </section>
     <div class="stack">
-      <a class="role" href="#demarrer"><b>Je suis le patron</b><span>Créer mon salon, 10 jours gratuits</span></a>
+      <a class="role" href="#demarrer"><b>Je suis le patron</b><span>Créer mon salon en une minute</span></a>
       <a class="role" href="#rejoindre"><b>Je suis coiffeur</b><span>Rejoindre le salon avec le code du patron</span></a>
       <form class="role role-form" id="cli" data-keep>
         <label for="cli-code"><b>Je suis client</b><span>Entre le code du salon ou scanne son QR code</span></label>
@@ -222,7 +225,8 @@ ROUTES.accueil = () => {
     <form class="role role-form" id="scr" data-keep>
       <label for="scr-code"><b>Écran d'attente</b><span>Pour un vieux téléphone ou une télé laissés allumés dans le salon</span></label>
       <div class="row"><input class="field" id="scr-code" maxlength="5" placeholder="Code du salon" autocapitalize="characters" autocomplete="off"><button class="btn alt">Afficher</button></div>
-    </form>`;
+    </form>
+    <p class="small" style="text-align:center"><a class="muted" href="#admin">Espace propriétaire de l'appli</a></p>`;
   $("#cli").onsubmit = (e) => { e.preventDefault(); const c = $("#cli-code").value.trim().toUpperCase(); if (c.length >= 4) go("ticket/" + c); };
   $("#scr").onsubmit = (e) => { e.preventDefault(); const c = $("#scr-code").value.trim().toUpperCase(); if (c.length >= 4) go("ecran/" + c); };
 };
@@ -245,6 +249,8 @@ ROUTES.demarrer = async () => {
       Store.signInEmail($("#em-mail").value.trim(), $("#em-pass").value, mode === "new").then(render, (er) => { $("#em-msg").className = "small msg-ko"; $("#em-msg").textContent = /wrong-password|invalid-cred|user-not-found/.test(er.code) ? "E-mail ou mot de passe incorrect." : /email-already/.test(er.code) ? "Ce compte existe déjà : appuie sur Se connecter." : "Connexion impossible. Vérifie le réseau."; }); };
     return;
   }
+  // le propriétaire de l'appli qui vient de se connecter va sur son espace admin
+  if (typeof isAdmin === "function" && isAdmin()) return go("admin");
   const mine = await Store.mySalons().catch(() => []);
   $view.innerHTML = `<h1>Mon salon</h1>
     ${mine.length ? `<div class="card"><h2>Mes salons</h2>${mine.map((s) => `<button class="line-btn" data-sid="${esc(s.id)}" type="button"><b>${esc(s.name)}</b><span class="muted small">${esc(s.quartier || "")} · code ${esc(s.id)}</span></button>`).join("")}</div>` : ""}

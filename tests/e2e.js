@@ -127,6 +127,15 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   const w = await adm.evaluate(async (sid) => { try { await firebase.firestore().collection('salons').doc(sid).update({ name: 'Piraté' }); return 'accepté'; } catch (e) { return e.code; } }, sid);
   check(w === 'permission-denied', 'règles : l\'admin ne modifie pas le salon d\'un client (' + w + ')');
   await adm.click('[data-dr="fin"]'); await W(adm, 2000);
+  // 12. Le propriétaire connecté arrive tout seul sur l'espace admin, et le bouton admin reste en haut
+  await adm.goto(U + '#accueil'); await W(adm, 2500);
+  check(adm.url().endsWith('#admin'), 'propriétaire : l\'accueil ouvre l\'espace admin');
+  await adm.click('[data-demo]'); await W(adm, 2500);
+  check(await adm.isVisible('#adm-link'), 'propriétaire : bouton « Espace admin » en haut en vue patron');
+  await adm.click('#adm-link'); await W(adm, 2000);
+  check(adm.url().endsWith('#admin'), 'propriétaire : retour à l\'admin en un appui');
+  const neuf = await phone('nouveau'); await neuf.goto(U + '#accueil'); await W(neuf, 2500);
+  check(await neuf.isHidden('#adm-link') && (await txt(neuf, 'main')).includes('Espace propriétaire'), 'client : pas de bouton admin, lien discret en bas de l\'accueil');
   const notAdmin = await phone('pas-admin'); await notAdmin.goto(U + '#admin'); await W(notAdmin, 2500);
   check((await txt(notAdmin, 'main')).includes('Connecte-toi'), 'espace admin fermé sans compte');
 

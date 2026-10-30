@@ -12,7 +12,7 @@ const salonState = (s, a) => s.demo ? ["Démo", "trial"] : s.blocked ? ["Suspend
 ROUTES.admin = () => {
   tabs("admin");
   if (!Store.isAccount()) {
-    $view.innerHTML = `<h1>Espace admin</h1><div class="card"><p>Connecte-toi avec ton compte.</p><button class="btn" id="ad-g" type="button">Continuer avec Google</button></div>
+    $view.innerHTML = `<h1>Espace propriétaire</h1><div class="card"><p>Connecte-toi avec ton compte de propriétaire de l'appli.</p><button class="btn" id="ad-g" type="button">Continuer avec Google</button></div>
       <form class="card" id="ad-em" data-keep><input class="field" id="ad-mail" type="email" placeholder="E-mail" required autocomplete="email"><input class="field" id="ad-pass" type="password" placeholder="Mot de passe" required autocomplete="current-password"><button class="btn alt">Se connecter</button><p class="small" id="ad-msg"></p></form>`;
     $("#ad-g").onclick = () => Store.signIn().then(render, () => toast("Connexion impossible."));
     $("#ad-em").onsubmit = (e) => { e.preventDefault(); Store.signInEmail($("#ad-mail").value.trim(), $("#ad-pass").value, false).then(render, () => { $("#ad-msg").className = "small msg-ko"; $("#ad-msg").textContent = "E-mail ou mot de passe incorrect."; }); };
