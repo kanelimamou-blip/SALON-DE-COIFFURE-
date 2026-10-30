@@ -162,12 +162,15 @@ const waLink = (phone, text) => `https://wa.me/${("221" + String(phone).replace(
 const $view = $("#view");
 let refreshFn = null;
 let idle = null;
+let viewSubs = [];
 function refresh() { if (refreshFn) { const a = document.activeElement; if (a && /INPUT|SELECT|TEXTAREA/.test(a.tagName) && a.closest("[data-keep]")) return; refreshFn(); } }
 function go(h) { if (location.hash === "#" + h) render(); else location.hash = h; }
 const ROUTES = {};
 function render() {
   const [r, arg] = location.hash.slice(1).split("/");
   refreshFn = null; clearInterval(idle); idle = null;
+  viewSubs.forEach((f) => f()); viewSubs = [];
+  $view.onclick = null;
   document.body.dataset.route = r || "accueil";
   releaseWake();
   let route = ROUTES[r] ? r : "accueil";
@@ -507,24 +510,28 @@ ROUTES.salon = () => {
     const s = LIVE.salon; if (!s) return;
     if (!built) {
       built = true;
-      $view.innerHTML = `<h1>Salon</h1><div id="s-sub"></div>
+      $view.innerHTML = `<div id="s-root" class="stack-l"><h1>Salon</h1><div id="s-sub"></div>
         <details class="card" open><summary><h2>QR code et écran d'attente</h2></summary><div id="s-qr"></div></details>
         <details class="card"><summary><h2>Coupes et prix</h2></summary><div id="s-svc" class="list"></div><button class="btn alt" type="button" id="svc-add">Ajouter une coupe</button></details>
         <details class="card"><summary><h2>Coiffeurs et pointage</h2></summary><div id="s-coif"></div><h3>Aujourd'hui</h3><div id="s-pt"></div><div id="s-code"></div></details>
         <details class="card"><summary><h2>Stock de produits <span id="s-stock-b"></span></h2></summary><div id="s-stock" class="list"></div>
           <form class="row" id="st-add" data-keep><input class="field" id="st-name" maxlength="30" placeholder="Produit (ex. Lames)" required><input class="field num-f" id="st-min" inputmode="numeric" placeholder="Alerte à" aria-label="Quantité minimale avant alerte"><button class="btn alt">Ajouter</button></form></details>
+        <details class="card"><summary><h2>Galerie des réalisations</h2></summary><p class="small muted">Photos de belles coupes faites au salon. Les clients les voient sur la page du salon et peuvent les partager.</p><div id="s-gal" class="gal"></div><label class="btn alt">Ajouter une photo<input type="file" accept="image/*" hidden id="gal-f"></label></details>
         <details class="card"><summary><h2>QR Wave du salon</h2></summary><p class="small muted">Prends en photo ton QR code Wave marchand : le client le scanne sur l'écran pour payer.</p><div id="s-wave"></div></details>
         <details class="card"><summary><h2>Informations</h2></summary><form id="s-info" data-keep>
           <label class="lbl" for="i-name">Nom</label><input class="field" id="i-name" maxlength="40">
           <label class="lbl" for="i-q">Quartier</label><input class="field" id="i-q" maxlength="50">
           <label class="lbl" for="i-tel">WhatsApp du salon</label><input class="field" id="i-tel" inputmode="tel" maxlength="20">
           <button class="btn alt">Enregistrer</button></form></details>
-        <details class="card"><summary><h2>Ce téléphone</h2></summary><div id="s-me"></div></details>`;
+        <details class="card"><summary><h2>Ce téléphone</h2></summary><div id="s-me"></div></details></div>`;
       $("#svc-add").onclick = () => { const list = services().concat({ id: uid(), name: "Nouvelle coupe", price: 1000, dur: 20, photo: "" }); Store.updateSalon(ME.sid, { services: list }); };
       $("#s-info").onsubmit = (e) => { e.preventDefault(); Store.updateSalon(ME.sid, { name: $("#i-name").value.trim() || s.name, quartier: $("#i-q").value.trim(), tel: $("#i-tel").value.trim() }); toast("Enregistré"); };
       $("#st-add").onsubmit = (e) => { e.preventDefault(); Store.add(ME.sid, "stock", { name: $("#st-name").value.trim(), qty: 0, min: +$("#st-min").value || 0 }); $("#st-name").value = ""; $("#st-min").value = ""; };
       bindSalonEdits();
       bindPointage($("#s-pt"));
+      $("#gal-f").onchange = async (e) => { const f = e.target.files[0]; if (f) { await Store.add(ME.sid, "galerie", { at: Date.now(), img: await shrink(f, 640, 0.6) }); e.target.value = ""; toast("Photo ajoutée"); } };
+      $("#s-gal").onclick = (e) => { const b = e.target.closest("[data-gd]"); if (b) Store.remove(ME.sid, "galerie", b.dataset.gd); };
+      viewSubs.push(Store.watch(ME.sid, "galerie", [], (rows) => { const el = $("#s-gal"); if (el) el.innerHTML = rows.sort((a, b) => b.at - a.at).map((g) => `<figure><img src="${g.img}" alt="Réalisation du salon"><button type="button" class="btn-ghost sm" data-gd="${esc(g.id)}" aria-label="Supprimer la photo">✕</button></figure>`).join("") || `<p class="empty">Aucune photo pour le moment.</p>`; }));
     }
     const fi = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v || ""; };
     fi("#i-name", s.name); fi("#i-q", s.quartier); fi("#i-tel", s.tel);
@@ -571,7 +578,8 @@ ROUTES.salon = () => {
 };
 function bindSalonEdits() {
   const saveList = (key, id, patch) => Store.updateSalon(ME.sid, { [key]: (key === "services" ? services() : coiffeurs()).map((x) => (x.id === id ? { ...x, ...patch } : x)) });
-  $view.addEventListener("change", async (e) => {
+  const root = $("#s-root");
+  root.addEventListener("change", async (e) => {
     const f = e.target.dataset.f; if (!f) return;
     const sv = e.target.closest("[data-sv]"), co = e.target.closest("[data-co]");
     if (sv) {
@@ -580,7 +588,7 @@ function bindSalonEdits() {
     }
     if (co) saveList("coiffeurs", co.dataset.co, { [f]: f === "name" ? e.target.value.trim() : Math.min(100, +e.target.value.replace(/\D/g, "") || 0) });
   });
-  $view.addEventListener("click", async (e) => {
+  root.addEventListener("click", async (e) => {
     const b = e.target.closest("button"); if (!b) return;
     const st = b.closest("[data-st]");
     if (st && b.dataset.d) { const x = LIVE.stock.find((y) => y.id === st.dataset.st); Store.update(ME.sid, "stock", x.id, { qty: Math.max(0, x.qty + +b.dataset.d) }); }
@@ -699,7 +707,7 @@ ROUTES.ticket = (sid) => {
           ${coiffeurs().length > 1 ? `<h2 class="sec">${t("Coiffeur")}</h2><div class="chips" id="t-coif"><button type="button" class="chip" data-c="" aria-pressed="${!choice.coif}">${t("Peu importe")}</button>${coiffeurs().map((c) => `<button type="button" class="chip" data-c="${esc(c.id)}" aria-pressed="${choice.coif === c.id}">${esc(c.name)}</button>`).join("")}</div>` : ""}
           <label class="lbl" for="t-name">${t("Ton prénom")}</label><input class="field" id="t-name" maxlength="30" required autocomplete="given-name" value="${esc(ME.name || "")}">
           <label class="lbl" for="t-tel">${t("Ton numéro (pour être prévenu)")}</label><input class="field" id="t-tel" inputmode="tel" maxlength="20" autocomplete="tel" value="${esc(ME.tel || "")}">
-          <button class="btn big">${t("Prendre mon ticket")}</button><p class="small" id="t-msg"></p></form>`);
+          <button class="btn big">${t("Prendre mon ticket")}</button><p class="small" id="t-msg"></p></form>`) + `<a class="btn-ghost" href="#galerie/${esc(sid)}">${t("Nos réalisations")}</a>`;
       const f = $("#t-form");
       if (f) {
         $("#t-cat").onclick = (e) => { const b = e.target.closest("[data-s]"); if (!b) return; choice.svc = b.dataset.s; $$("#t-cat [data-s]").forEach((x) => x.setAttribute("aria-pressed", x === b)); };
@@ -752,6 +760,32 @@ ROUTES.ecran = (sid) => {
     $$("[data-l]").forEach((b) => (b.onclick = () => { ME.lang = b.dataset.l; saveMe(); refresh(); }));
   };
   idle = setInterval(refresh, 20000);
+  refresh();
+};
+
+// ---------- Galerie des réalisations, à partager (idée 9)
+ROUTES.galerie = (sid) => {
+  sid = (sid || "").toUpperCase();
+  follow(sid, isStaff() && ME.sid === sid ? ME.role : "client");
+  let rows = [];
+  const off = Store.watch(sid, "galerie", [], (r) => { rows = r.sort((a, b) => b.at - a.at); refresh(); });
+  viewSubs.push(off);
+  refreshFn = () => {
+    const s = LIVE.salon; if (!s) return;
+    $view.innerHTML = `<h1>${t("Nos réalisations")}</h1><p class="muted">${esc(s.name)}${s.quartier ? " · " + esc(s.quartier) : ""}</p>
+      <div class="gal big">${rows.map((g, i) => `<figure><img src="${g.img}" alt="Coupe réalisée au salon"><button type="button" class="btn-ghost sm" data-sh="${i}">Partager</button></figure>`).join("") || `<p class="empty">Le salon n'a pas encore ajouté de photos.</p>`}</div>
+      <a class="btn alt" href="#ticket/${esc(sid)}">${t("Prendre mon ticket")}</a>`;
+    $view.onclick = async (e) => {
+      const b = e.target.closest("[data-sh]"); if (!b) return;
+      const g = rows[+b.dataset.sh], text = `Coupe faite chez ${s.name}. Prends ton ticket : ${ticketUrl(sid)}`;
+      try {
+        const file = new File([await (await fetch(g.img)).blob()], "coupe.jpg", { type: "image/jpeg" });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) return await navigator.share({ files: [file], text });
+        if (navigator.share) return await navigator.share({ text, url: ticketUrl(sid) });
+      } catch (er) { if (er && er.name === "AbortError") return; }
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+    };
+  };
   refresh();
 };
 

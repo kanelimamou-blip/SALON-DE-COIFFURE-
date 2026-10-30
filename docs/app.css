@@ -250,3 +250,8 @@ body[data-route="ecran"] main{max-width:none;padding:0}
   background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:12px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.25)}
 #toast button{background:transparent;border:0;color:var(--accent);font-weight:800;cursor:pointer;min-height:36px;filter:brightness(1.4)}
 .lock p{margin:0}
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;margin-bottom:10px}
+.gal.big{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.gal figure{margin:0;display:flex;flex-direction:column;gap:4px}
+.gal img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:var(--surface-2)}
+.stack-l{display:flex;flex-direction:column;gap:16px}
