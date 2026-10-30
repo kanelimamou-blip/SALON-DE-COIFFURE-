@@ -1,0 +1,63 @@
+rules_version = '2';
+// Règles à coller dans la console Firebase (Firestore > Règles) du projet de l'appli Salon.
+// Remplacer UID_ADMIN par l'identifiant affiché dans Salon > Ce téléphone, sur le compte qui valide les paiements.
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signed() { return request.auth != null; }
+    function admin() { return signed() && request.auth.uid in ['UID_ADMIN']; }
+    function salon(sid) { return get(/databases/$(db)/documents/salons/$(sid)).data; }
+    function owner(sid) { return signed() && salon(sid).owner == request.auth.uid; }
+    function staffDoc(sid) { return /databases/$(db)/documents/salons/$(sid)/staff/$(request.auth.uid); }
+    function staff(sid) { return signed() && exists(staffDoc(sid)); }
+    function team(sid) { return owner(sid) || staff(sid); }
+
+    match /salons/{sid} {
+      // la fiche du salon est publique : nom, coupes, prix, ouvert ou fermé
+      allow read: if true;
+      allow create: if signed() && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.created == request.time && request.resource.data.premiumUntil == 0;
+      // le patron ne peut toucher ni à la date de création (essai) ni à l'abonnement
+      allow update: if (owner(sid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['owner', 'created', 'premiumUntil']))
+        || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['premiumUntil']));
+
+      match /private/{doc} { allow read, write: if owner(sid); }
+      match /staff/{uid} {
+        allow read: if owner(sid) || (signed() && request.auth.uid == uid);
+        allow create: if signed() && request.auth.uid == uid
+          && request.resource.data.code == get(/databases/$(db)/documents/salons/$(sid)/private/config).data.staffCode;
+        allow delete: if owner(sid);
+      }
+      match /meta/counter { allow read, write: if signed(); }
+      match /queue/{id} {
+        allow read: if true;
+        allow create: if signed() && request.resource.data.uid == request.auth.uid
+          && request.resource.data.status == 'attente' && request.resource.data.name is string && request.resource.data.name.size() <= 30;
+        allow update: if team(sid) || (signed() && resource.data.uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status == 'parti');
+        allow delete: if owner(sid);
+      }
+      match /contacts/{id} {
+        allow create: if signed();
+        allow read, update, delete: if team(sid);
+      }
+      // un coiffeur ne voit que ses propres coupes (idée 66)
+      match /ventes/{id} {
+        allow read, update, delete: if owner(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId);
+        allow create: if owner(sid) || (staff(sid) && request.resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId);
+      }
+      match /pointage/{id} {
+        allow read: if true;
+        allow write: if team(sid);
+      }
+      match /depenses/{id} { allow read, write: if owner(sid); }
+      match /stock/{id} { allow read, write: if owner(sid); }
+      match /galerie/{id} { allow read: if true; allow write: if owner(sid); }
+    }
+
+    match /paiements/{id} {
+      allow create: if signed() && request.resource.data.uid == request.auth.uid && request.resource.data.status == 'attente';
+      allow read, update: if admin();
+    }
+  }
+}

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Salon : file d'attente et caisse</title>
+<meta name="description" content="La file d'attente, les coupes et la caisse du salon de coiffure sur le téléphone. Le client sait quand c'est son tour. 10 jours gratuits.">
+<meta property="og:title" content="Salon : file d'attente et caisse">
+<meta property="og:description" content="Le client prend son ticket à distance, le patron suit la recette de chaque coiffeur. 10 jours gratuits.">
+<meta name="theme-color" content="#f2f4f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e131c" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Figtree:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#accueil"><span class="logo" aria-hidden="true"></span><b>Salon</b></a>
+  <span class="top-r"><span id="offline" class="off" hidden>Hors connexion</span><button id="install" class="btn-ghost sm" type="button" hidden>Installer</button></span>
+</header>
+<main id="view" tabindex="-1"></main>
+<nav class="tabs" id="tabs" aria-label="Navigation" hidden></nav>
+<script src="config.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="store.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
