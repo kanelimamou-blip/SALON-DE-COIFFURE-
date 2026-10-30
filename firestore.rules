@@ -48,6 +48,16 @@ service cloud.firestore {
         allow read, update, delete: if active(sid) && (owner(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
         allow create: if active(sid) && (owner(sid) || (staff(sid) && request.resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
       }
+      // rendez-vous : les créneaux pris sont publics (prénom seulement), le client peut annuler ou reporter le sien
+      match /rdv/{id} {
+        allow read: if true;
+        allow create: if signed() && request.resource.data.uid == request.auth.uid && request.resource.data.status == 'confirme'
+          && request.resource.data.name is string && request.resource.data.name.size() <= 30;
+        allow update: if team(sid) || (signed() && resource.data.uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'day', 'time']));
+        allow delete: if owner(sid);
+      }
+      match /clients/{id} { allow read, write: if team(sid); }
       match /pointage/{id} {
         allow read: if true;
         allow write: if team(sid);

@@ -59,6 +59,8 @@ const Store = (() => {
   const watchSalon = (sid, cb, err) => S(sid).onSnapshot((d) => cb(d.exists ? fromDoc(d) : null), err || (() => cb(null)));
   async function getSalon(sid) { const d = await S(sid).get(); return d.exists ? fromDoc(d) : null; }
   const updateSalon = (sid, patch) => S(sid).update(patch);
+  // annuaire (idée 26) : salons qui ont choisi d'y figurer
+  const watchDirectory = (cb) => db.collection("salons").where("annuaire", "==", true).onSnapshot((q) => cb(q.docs.map(fromDoc)), () => cb([]));
   async function mySalons() {
     if (!isAccount()) return [];
     const q = await db.collection("salons").where("owner", "==", user.uid).get();
@@ -113,7 +115,7 @@ const Store = (() => {
     init, ensureUser, signIn, signInEmail, signOut, isAccount,
     get uid() { return user ? user.uid : null; },
     get email() { return user ? user.email || "" : ""; },
-    createSalon, watchSalon, getSalon, updateSalon, mySalons,
+    createSalon, watchSalon, getSalon, updateSalon, mySalons, watchDirectory,
     watch, add, set, update, remove, getDoc, nextNumber,
     staffCode, newStaffCode, joinStaff, declarePayment, watchPayments, validatePayment,
   };
