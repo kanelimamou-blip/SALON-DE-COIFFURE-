@@ -239,10 +239,24 @@ ROUTES.invite = (data) => {
   go("demarrer");
 };
 
+// ---------- Installer l'appli sur le téléphone (proposé au patron invité dès l'ouverture du lien)
+const installed = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+function installCard() {
+  if (installed()) return "";
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  return `<div class="card install-card" id="inst-card"><h2>Installe l'appli sur ton téléphone</h2>
+    ${installEvt ? `<p class="small">Elle s'ouvrira comme une vraie appli, depuis ton écran d'accueil.</p><button class="btn" type="button" id="inst-btn">Installer l'appli</button>`
+      : ios ? `<p class="small">Dans Safari, appuie sur le bouton Partager <b>⬆︎</b>, puis sur « Sur l'écran d'accueil ».</p>`
+      : `<p class="small">Ouvre le menu <b>⋮</b> du navigateur, puis « Installer l'application » ou « Ajouter à l'écran d'accueil ».</p>`}</div>`;
+}
+function bindInstall() { const b = $("#inst-btn"); if (b) b.onclick = () => $("#install").click(); }
+window.addEventListener("beforeinstallprompt", () => setTimeout(() => { const c = $("#inst-card"); if (c) { c.outerHTML = installCard(); bindInstall(); } }));
+window.addEventListener("appinstalled", () => { const c = $("#inst-card"); if (c) c.remove(); toast("Appli installée"); });
+
 // ---------- Patron : connexion puis création du salon
 ROUTES.demarrer = async () => {
   if (!Store.isAccount()) {
-    $view.innerHTML = `<h1>Mon compte patron</h1>
+    $view.innerHTML = `${ME.invite ? installCard() : ""}<h1>Mon compte patron</h1>
       <div class="card"><p>Ton compte garde les chiffres du salon, même si tu changes de téléphone.</p>
         <button class="btn" id="g" type="button">Continuer avec Google</button></div>
       <form class="card" id="em" data-keep><h2>Ou avec un e-mail</h2>
@@ -250,6 +264,7 @@ ROUTES.demarrer = async () => {
         <input class="field" id="em-pass" type="password" placeholder="Mot de passe (6 caractères ou plus)" minlength="6" autocomplete="current-password" required>
         <div class="row"><button class="btn" data-a="in">Se connecter</button><button class="btn alt" data-a="new">Créer le compte</button></div>
         <p class="small" id="em-msg"></p></form>`;
+    bindInstall();
     $("#g").onclick = () => Store.signIn().then(render, (e) => toast("Connexion impossible : " + (e.code || e.message)));
     let mode = "in";
     $$("#em button").forEach((b) => (b.onclick = () => { mode = b.dataset.a; }));
@@ -261,7 +276,7 @@ ROUTES.demarrer = async () => {
   if (typeof isAdmin === "function" && isAdmin() && !ME.invite) return go("admin");
   const inv = ME.invite || {};
   const mine = await Store.mySalons().catch(() => []);
-  $view.innerHTML = `<h1>Mon salon</h1>
+  $view.innerHTML = `${ME.invite ? installCard() : ""}<h1>Mon salon</h1>
     ${mine.length ? `<div class="card"><h2>Mes salons</h2>${mine.map((s) => `<button class="line-btn" data-sid="${esc(s.id)}" type="button"><b>${esc(s.name)}</b><span class="muted small">${esc(s.quartier || "")} · code ${esc(s.id)}</span></button>`).join("")}</div>` : ""}
     <form class="card" id="new" data-keep><h2>${mine.length ? "Ajouter un salon" : "Créer mon salon"}</h2>${inv.n ? `<p class="small muted">Tes informations sont déjà remplies : vérifie-les, puis crée le salon.</p>` : ""}
       <label class="lbl" for="n-name">Nom du salon</label><input class="field" id="n-name" required maxlength="40" placeholder="Ex. Salon Teranga" value="${esc(inv.n || "")}">
@@ -270,6 +285,7 @@ ROUTES.demarrer = async () => {
       <label class="lbl" for="n-coif">Prénoms des coiffeurs (séparés par des virgules)</label><input class="field" id="n-coif" maxlength="120" placeholder="Ex. Modou, Ibou, Pape" value="${esc(inv.c || "")}">
       <button class="btn">Créer le salon</button></form>`;
   $$("[data-sid]").forEach((b) => (b.onclick = () => { Object.assign(ME, { role: "patron", sid: b.dataset.sid }); saveMe(); go("file"); }));
+  bindInstall();
   $("#new").onsubmit = async (e) => {
     e.preventDefault();
     const names = $("#n-coif").value.split(",").map((s) => s.trim()).filter(Boolean);

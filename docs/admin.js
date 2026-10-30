@@ -32,18 +32,27 @@ ROUTES.admin = () => {
     r.filter((s) => !(s.id in act)).forEach((s) => { act[s.id] = null; Store.activity(s.id, since).then((a) => { act[s.id] = a; paint(); }).catch(() => {}); });
   }, () => { $("#ad-list").innerHTML = `<p class="empty">Lecture impossible : vérifie que les règles Firebase sont à jour.</p>`; }));
   viewSubs.push(Store.watchErrors(Date.now() - 7 * 864e5, (r) => { errs = r; paint(); }));
-  $view.innerHTML = `<h1>Espace admin</h1>
-    <div class="card"><h2>Mode présentation</h2><p class="small muted">Montre l'appli sur ton seul téléphone : tu passes de patron à coiffeur ou client avec la barre en haut de l'écran.</p><div id="ad-demo" class="stack"><p class="muted">Chargement…</p></div></div>
-    <div class="card"><h2>Nouveau patron</h2><p class="small muted">Remplis ce que tu sais, puis fais scanner le QR code ou envoie le lien : l'appli s'ouvre chez lui avec son salon déjà rempli.</p>
+  let tab = "comptes";
+  $view.innerHTML = `<div class="head-row"><h1>Espace admin</h1><button type="button" class="btn-ghost sm" id="ad-reload" aria-label="Actualiser">↻</button></div>
+    <p class="muted">Visible seulement par toi. Les patrons, les coiffeurs et les clients ne voient rien de cet espace.</p>
+    <div id="ad-kpi"></div>
+    <button type="button" class="ad-tog" data-tog="ad-p-demo" aria-expanded="false">🎬 Mode présentation (passer d'un rôle à l'autre)</button>
+    <div class="card" id="ad-p-demo" hidden><p class="small muted">Montre l'appli sur ton seul téléphone : tu passes de patron à coiffeur ou client avec la barre en haut de l'écran.</p><div id="ad-demo" class="stack"><p class="muted">Chargement…</p></div></div>
+    <button type="button" class="ad-tog" data-tog="ad-p-inv" aria-expanded="false">📲 Inviter un nouveau patron (lien ou QR code)</button>
+    <div class="card" id="ad-p-inv" hidden><p class="small muted">Remplis ce que tu sais. Le patron scanne le QR code ou ouvre le lien reçu par WhatsApp : l'appli lui propose de s'installer, et son salon est déjà rempli.</p>
       <form id="ad-inv" class="stack" data-keep><input class="field" id="iv-n" maxlength="40" placeholder="Nom du salon"><input class="field" id="iv-q" maxlength="50" placeholder="Quartier et ville">
         <input class="field" id="iv-t" inputmode="tel" maxlength="20" placeholder="Numéro WhatsApp du patron"><input class="field" id="iv-c" maxlength="120" placeholder="Prénoms des coiffeurs (séparés par des virgules)">
         <button class="btn">Créer le lien et le QR code</button></form><div id="iv-out"></div></div>
-    <div id="ad-kpi"></div>
-    <div class="row" data-keep><input class="field" id="ad-q" placeholder="Chercher un salon, un quartier, un code" autocomplete="off"></div>
-    <div class="chips" id="ad-f">${["tous", "actifs", "inactifs", "nouveaux", "suspendus"].map((f) => `<button type="button" class="chip" data-f="${f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join("")}</div>
-    <div id="ad-list" class="list"><p class="muted">Chargement…</p></div>
-    <p class="small muted">Activité = tickets et rendez-vous des 7 derniers jours. « Voir le salon » l'ouvre comme son patron le voit : tu peux tout regarder, mais pas modifier un salon qui n'est pas à toi.</p>
-    <h2>Erreurs des 7 derniers jours</h2><div id="ad-err" class="list"></div>`;
+    <div class="ad-tabs" id="ad-tabs"><button type="button" data-tab="comptes"></button><button type="button" data-tab="erreurs"></button></div>
+    <div id="ad-t-comptes">
+      <input class="field" id="ad-q" placeholder="Chercher un salon, un quartier, un téléphone, un code" autocomplete="off" data-keep>
+      <div class="chips" id="ad-f"></div>
+      <div id="ad-list" class="list"><p class="muted">Chargement…</p></div>
+      <p class="small muted">Activité = tickets et rendez-vous des 7 derniers jours. « Voir le salon » l'ouvre comme son patron le voit : tu peux tout regarder, mais pas modifier un salon qui n'est pas à toi.</p></div>
+    <div id="ad-t-erreurs" hidden><div id="ad-err" class="list"></div></div>`;
+  $("#ad-reload").onclick = () => render();
+  $$(".ad-tog").forEach((b) => (b.onclick = () => { const p = $("#" + b.dataset.tog), open = p.hidden; p.hidden = !open; b.setAttribute("aria-expanded", open); }));
+  $("#ad-tabs").onclick = (e) => { const b = e.target.closest("[data-tab]"); if (b) { tab = b.dataset.tab; paint(); } };
   const demos = () => Store.mySalons().then((m) => {
     const el = $("#ad-demo"); if (!el) return;
     el.innerHTML = m.map((s) => `<button class="line-btn" type="button" data-demo="${esc(s.id)}"><b>Présenter ${esc(s.name)}</b><span class="muted small">code ${esc(s.id)}</span></button>`).join("")
@@ -64,13 +73,16 @@ ROUTES.admin = () => {
   };
   $("#ad-q").oninput = (e) => { q = e.target.value.trim().toLowerCase(); paint(); };
   $("#ad-f").onclick = (e) => { const b = e.target.closest("[data-f]"); if (b) { filter = b.dataset.f; paint(); } };
-  const keep = (s) => { const st = salonState(s, act[s.id])[0]; return filter === "tous" || (filter === "actifs" && st === "Actif") || (filter === "inactifs" && st === "Inactif") || (filter === "nouveaux" && st === "Nouveau") || (filter === "suspendus" && st === "Suspendu"); };
+  const FILTERS = [["tous", "Tous"], ["Actif", "Actif"], ["Nouveau", "Nouveau"], ["Inactif", "Inactif"], ["Suspendu", "Suspendu"], ["Démo", "Démo"]];
+  const keep = (s) => filter === "tous" || salonState(s, act[s.id])[0] === filter;
   function paint() {
     if (!$("#ad-list")) return;
-    const n = (st) => rows.filter((s) => salonState(s, act[s.id])[0] === st).length;
-    $("#ad-kpi").innerHTML = `<div class="kpis"><div><b>${rows.filter((s) => !s.demo).length}</b><span>${rows.filter((s) => !s.demo).length > 1 ? "salons inscrits" : "salon inscrit"}</span></div><div><b>${n("Actif")}</b><span>actifs cette semaine</span></div><div><b>${n("Inactif")}</b><span>inactifs</span></div><div><b>${errs.length}</b><span>erreurs (7 j)</span></div></div>`;
-    $$("#ad-f [data-f]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.f === filter));
-    const list = rows.filter((s) => keep(s) && (!q || `${s.name} ${s.quartier || ""} ${s.id}`.toLowerCase().includes(q)));
+    const n = (st) => rows.filter((s) => salonState(s, act[s.id])[0] === st).length, real = rows.filter((s) => !s.demo).length;
+    $("#ad-kpi").innerHTML = `<div class="kpis ad-kpis"><div><b>${real}</b><span>${real > 1 ? "salons inscrits" : "salon inscrit"}</span></div><div><b>${n("Actif")}</b><span>actifs cette semaine</span></div><div><b>${n("Inactif")}</b><span>inactifs (plus de 7 jours)</span></div><div><b>${errs.length}</b><span>erreurs sur 7 jours</span></div></div>`;
+    $("#ad-tabs").innerHTML = `<button type="button" data-tab="comptes" aria-pressed="${tab === "comptes"}">Salons (${real})</button><button type="button" data-tab="erreurs" aria-pressed="${tab === "erreurs"}">Erreurs (${errs.length})</button>`;
+    $("#ad-t-comptes").hidden = tab !== "comptes"; $("#ad-t-erreurs").hidden = tab !== "erreurs";
+    $("#ad-f").innerHTML = FILTERS.filter(([f]) => f !== "Démo" || n("Démo")).map(([f, l]) => `<button type="button" class="chip" data-f="${f}" aria-pressed="${filter === f}">${l} (${f === "tous" ? rows.length : n(f)})</button>`).join("");
+    const list = rows.filter((s) => keep(s) && (!q || `${s.name} ${s.quartier || ""} ${s.tel || ""} ${s.id}`.toLowerCase().includes(q)));
     $("#ad-list").innerHTML = list.length ? list.map((s) => {
       const a = act[s.id], [st, cls] = salonState(s, a), e = errs.filter((x) => x.sid === s.id).length;
       return `<div class="card ad-row" data-sid="${esc(s.id)}"><div class="head-row"><div><b>${esc(s.name)}</b> <span class="code small">${esc(s.id)}</span><br><span class="small muted">${esc(s.quartier || "")}${s.tel ? " · " + esc(s.tel) : ""} · inscrit le ${s.created ? new Date(s.created).toLocaleDateString("fr-FR") : "?"} · ${(s.coiffeurs || []).length} coiffeur(s)</span></div><span class="st st-${cls}">${st}</span></div>
@@ -119,7 +131,7 @@ async function startDemo(sid, role) {
 }
 window.demoBar = () => {
   const bar = $("#demo-bar");
-  bar.hidden = !ME.demo || !isAdmin();
+  bar.hidden = !ME.demo || !isAdmin() || document.body.dataset.route === "admin";
   if (bar.hidden) return;
   const cur = ME.role;
   bar.innerHTML = `<span class="small">${ME.sid && LIVE.salon && LIVE.salon.owner !== Store.uid ? `Vue de <b>${esc(LIVE.salon.name)}</b>` : "Présentation"}</span>${[["patron", "Patron"], ["coiffeur", "Coiffeur"], ["client", "Client"]].map(([r, l]) => `<button type="button" class="chip sm" data-dr="${r}" aria-pressed="${cur === r}">${l}</button>`).join("")}<button type="button" class="btn-ghost sm" data-dr="fin" aria-label="Quitter la présentation">✕</button>`;

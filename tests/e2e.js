@@ -96,7 +96,8 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   check((await txt(adm, '#ad-list')).includes('Salon Essai'), 'admin : voit le salon dans la liste');
   check((await txt(adm, '#ad-kpi')).includes('inscrit'), 'admin : chiffres globaux affichés');
   check((await txt(adm, `[data-sid="${sid}"]`)).includes('Actif'), 'admin : salon actif cette semaine');
-  check((await txt(adm, '#ad-err')).includes('Erreur de test e2e'), 'admin : erreur d\'un téléphone remontée');
+  await adm.click('[data-tab="erreurs"]'); check((await txt(adm, '#ad-err')).includes('Erreur de test e2e'), 'admin : erreur d\'un téléphone remontée');
+  await adm.click('[data-tab="comptes"]');
   const peek = await cli.evaluate(async () => { try { await firebase.firestore().collection('erreurs').get(); return 'accepté'; } catch (e) { return e.code; } });
   check(peek === 'permission-denied', 'règles : un client ne lit pas les erreurs (' + peek + ')');
   await adm.click(`[data-sid="${sid}"] [data-ad="block"]`); await W(adm, 2500);
@@ -108,7 +109,7 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   await adm.click(`[data-sid="${sid}"] [data-ad="unblock"]`); await W(adm, 2000);
   // 10. Mode présentation : salon de démo, puis patron, coiffeur et client sur le même téléphone
   await adm.goto(U + '#admin'); await W(adm, 2500);
-  await adm.click('#ad-new-demo'); await W(adm, 5000);
+  await adm.click('[data-tog="ad-p-demo"]'); await W(adm, 1000); await adm.click('#ad-new-demo'); await W(adm, 5000);
   check((await txt(adm, 'main')).includes('Fallou') && (await txt(adm, '#demo-bar')).includes('Présentation'), 'présentation : salon démo créé, file remplie, barre affichée');
   await adm.click('[data-dr="coiffeur"]'); await W(adm, 2500);
   check((await txt(adm, '#tabs')).includes('Mes coupes'), 'présentation : vue coiffeur');
@@ -130,7 +131,7 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   // 12. Le propriétaire connecté arrive tout seul sur l'espace admin, et le bouton admin reste en haut
   await adm.goto(U + '#accueil'); await W(adm, 2500);
   check(adm.url().endsWith('#admin'), 'propriétaire : l\'accueil ouvre l\'espace admin');
-  await adm.click('[data-demo]'); await W(adm, 2500);
+  await adm.click('#ad-list [data-demo]'); await W(adm, 2500);
   check(await adm.isVisible('#adm-link'), 'propriétaire : bouton « Espace admin » en haut en vue patron');
   await adm.click('#adm-link'); await W(adm, 2000);
   check(adm.url().endsWith('#admin'), 'propriétaire : retour à l\'admin en un appui');
@@ -138,12 +139,15 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   check(await neuf.isHidden('#adm-link') && (await txt(neuf, 'main')).includes('Espace propriétaire'), 'client : pas de bouton admin, lien discret en bas de l\'accueil');
   // 13. L'admin invite un nouveau patron : lien et QR code, salon prérempli chez le patron
   await adm.goto(U + '#admin'); await W(adm, 2500);
-  await adm.fill('#iv-n', 'Salon Invité'); await adm.fill('#iv-q', 'Pikine'); await adm.fill('#iv-t', '771234567'); await adm.fill('#iv-c', 'Abdou, Lamine');
+  await adm.click('[data-tog="ad-p-inv"]'); await adm.fill('#iv-n', 'Salon Invité'); await adm.fill('#iv-q', 'Pikine'); await adm.fill('#iv-t', '771234567'); await adm.fill('#iv-c', 'Abdou, Lamine');
   await adm.click('#ad-inv .btn'); await W(adm, 1000);
+  if (process.env.SHOTS) { await adm.evaluate(() => scrollTo(0, 0)); await adm.screenshot({ path: process.env.SHOTS + '/admin.png', fullPage: true }); }
   const link = await adm.evaluate(() => document.querySelector('#iv-out a[href*="wa.me"]').href);
   const inviteUrl = decodeURIComponent(link.split('text=')[1]).match(/http\S+/)[0];
   check(await adm.isVisible('#iv-out svg') && inviteUrl.includes('#invite/'), 'admin : lien et QR code d\'invitation créés');
   const np = await phone('nouveau-patron'); await np.goto(inviteUrl); await W(np, 2500);
+  check((await txt(np, 'main')).includes('Installe l\'appli'), 'nouveau patron : invitation à installer l\'appli dès l\'ouverture du lien');
+  if (process.env.SHOTS) await np.screenshot({ path: process.env.SHOTS + '/invite.png' });
   await np.fill('#em-mail', `np${Date.now()}@test.sn`); await np.fill('#em-pass', 'patron123'); await np.click('#em [data-a="new"]'); await W(np, 3000);
   check(await np.inputValue('#n-name') === 'Salon Invité' && await np.inputValue('#n-coif') === 'Abdou, Lamine', 'nouveau patron : salon prérempli après l\'inscription');
   await np.click('#new .btn'); await W(np, 3000);

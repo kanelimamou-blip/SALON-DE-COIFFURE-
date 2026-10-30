@@ -281,3 +281,10 @@ a.dir{color:var(--ink);text-decoration:none}
 .demo-bar[hidden]{display:none}
 .demo-bar .chip{min-height:34px;padding:4px 12px}
 .demo-bar .btn-ghost{margin-left:auto}
+.ad-kpis{grid-template-columns:1fr 1fr}
+.ad-tog{display:block;width:100%;margin-top:12px;padding:14px 16px;border:0;border-radius:14px;background:var(--surface-2);color:var(--ink);font:inherit;font-weight:700;text-align:center;cursor:pointer}
+.ad-tog[aria-expanded="true"]{background:var(--ink);color:var(--bg)}
+.ad-tabs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0 10px}
+.ad-tabs button{min-height:48px;border:0;border-radius:12px;background:var(--surface-2);color:var(--ink);font:inherit;font-weight:700;cursor:pointer}
+.ad-tabs button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.install-card{border:2px solid var(--accent);margin-bottom:16px}
