@@ -335,3 +335,5 @@ body.big-ui .svc{min-height:110px;font-size:1.15rem}
 .ad-kpis button{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;min-width:0;font:inherit;color:inherit;text-align:left;cursor:pointer}
 .ad-kpis button:active{background:var(--surface-2)}
 .kpis .pos b{color:var(--ok)}.kpis .neg b{color:var(--ko)}
+.annonce{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--warn-soft);color:var(--ink);border-bottom:1px solid var(--line);font-weight:600}
+.annonce[hidden]{display:none}.annonce span{flex:1}
