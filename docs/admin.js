@@ -83,6 +83,12 @@ ROUTES.admin = async () => {
     <div id="ad-t-journal" data-t hidden></div>`;
   $("#ad-reload").onclick = () => render();
   $$(".ad-tog").forEach((b) => (b.onclick = () => { const p = $("#" + b.dataset.tog), o = p.hidden; p.hidden = !o; b.setAttribute("aria-expanded", o); if (o && b.dataset.tog === "ad-p-map") drawMap(rows); if (o && b.dataset.tog === "ad-p-as") paintAssoc(); }));
+  $("#ad-kpi").onclick = (e) => {
+    const b = e.target.closest("[data-kpi]"); if (!b) return;
+    const [t, f] = b.dataset.kpi.split(":"); tab = ME.adTab = t; saveMe();
+    if (f === "actifs") sort = "actifs"; else if (f) { filter = f; sort = "recent"; }
+    paint(); $("#ad-tabs").scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   $("#ad-tabs").onclick = (e) => { const b = e.target.closest("[data-tab]"); if (b) { tab = ME.adTab = b.dataset.tab; saveMe(); paint(); } };
   const demos = () => Store.mySalons().then((m) => {
     const el = $("#ad-demo"); if (!el) return;
@@ -131,10 +137,12 @@ ROUTES.admin = async () => {
     const risk = real.filter((s) => atRisk(s, act[s.id])).length, nUnread = rows.reduce((x, s) => x + unread(s.id), 0);
     const paidMonth = pays.filter((p) => dayOf(p.at).startsWith(month)).reduce((x, p) => x + (p.amount || 0), 0);
     // tableau du jour (idée 1)
-    $("#ad-kpi").innerHTML = `<div class="kpis ad-kpis"><div><b>${real.length}</b><span>${real.length > 1 ? "salons inscrits" : "salon inscrit"}</span></div><div><b>${n("Actif")}</b><span>actifs cette semaine</span></div>
-      <div><b>${A.reduce((x, a) => x + a.hierT, 0)}</b><span>tickets hier</span></div><div><b>${A.reduce((x, a) => x + a.hierV, 0)}</b><span>coupes encaissées hier</span></div>
-      <div class="${risk ? "neg" : ""}"><b>${risk}</b><span>à risque (rien encaissé 7 j)</span></div>${boss ? `<div class="pos"><b>${fcfa(paidMonth)}</b><span>encaissé par toi en ${MOIS[+month.slice(5) - 1]}</span></div>` : ""}
-      <div class="${nUnread ? "neg" : ""}"><b>${nUnread}</b><span>messages non lus</span></div><div><b>${base.length}</b><span>numéros dans la base</span></div></div>`;
+    // chaque case ouvre la liste qui va avec
+    const K = (go, cls, v, l) => `<button type="button" class="${cls}" data-kpi="${go}"><b>${v}</b><span>${l}</span></button>`;
+    $("#ad-kpi").innerHTML = `<div class="kpis ad-kpis">${K("comptes:tous", "", real.length, real.length > 1 ? "salons inscrits" : "salon inscrit")}${K("comptes:Actif", "", n("Actif"), "actifs cette semaine")}
+      ${K("comptes:actifs", "", A.reduce((x, a) => x + a.hierT, 0), "tickets hier")}${K("comptes:actifs", "", A.reduce((x, a) => x + a.hierV, 0), "coupes encaissées hier")}
+      ${K("comptes:risque", risk ? "neg" : "", risk, "à risque (rien encaissé 7 j)")}${boss ? K("paie", "pos", fcfa(paidMonth), "encaissé par toi en " + MOIS[+month.slice(5) - 1]) : ""}
+      ${K("messages", nUnread ? "neg" : "", nUnread, "messages non lus")}${K("base", "", base.length, "numéros dans la base")}</div>`;
     const TABS = [["comptes", `Salons (${real.length})`], ["messages", `Messages${nUnread ? ` (${nUnread})` : ""}`], ["invit", `Invitations (${invs.length})`], ["base", `Numéros (${base.length})`], ...(boss ? [["paie", "Paiements"]] : []), ["tel", "Téléphones"], ["erreurs", `Erreurs (${errs.length})`], ["journal", "Journal"]];
     $("#ad-tabs").innerHTML = TABS.map(([k, l]) => `<button type="button" class="chip" data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join("");
     $$("[data-t]").forEach((d) => { d.hidden = d.id !== "ad-t-" + tab; });
