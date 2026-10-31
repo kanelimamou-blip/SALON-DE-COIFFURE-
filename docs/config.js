@@ -12,7 +12,9 @@ const FIREBASE_CONFIG = {
 };
 
 const CFG = {
+  version: "2026-10-31",              // à changer à chaque mise en ligne : l'admin voit quelle version tourne sur chaque téléphone
   contact: "78 272 19 20",             // numéro de l'équipe de l'appli, affiché à un salon suspendu
+  prix: { mois: 2000, an: 20000, essaiJours: 30 },  // abonnement payé hors de l'appli (rappelé dans les relances WhatsApp)
   // Comptes qui ouvrent l'espace admin (#admin) : identifiant affiché sur cette page, à copier ici
   // et à la place de UID_ADMIN dans firestore.rules.
   // Le paiement de l'abonnement se fait hors de l'appli ; l'espace admin sert à superviser et à suspendre un salon

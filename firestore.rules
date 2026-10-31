@@ -5,14 +5,23 @@ service cloud.firestore {
   match /databases/{db}/documents {
     function signed() { return request.auth != null; }
     function admin() { return signed() && request.auth.uid in ['tBGAaRZCZjhVm5gkb414ObcF7Cf2']; }
+    // associés : admins en lecture seule (liste tenue par l'admin dans admin/config), ils peuvent aussi écrire aux patrons
+    function associe() { return signed() && exists(/databases/$(db)/documents/admin/config)
+      && request.auth.uid in get(/databases/$(db)/documents/admin/config).data.get('associes', []); }
+    function voit() { return admin() || associe(); }
     function salon(sid) { return get(/databases/$(db)/documents/salons/$(sid)).data; }
     function owner(sid) { return signed() && salon(sid).owner == request.auth.uid; }
     function staffDoc(sid) { return /databases/$(db)/documents/salons/$(sid)/staff/$(request.auth.uid); }
     function staff(sid) { return signed() && exists(staffDoc(sid)); }
     function team(sid) { return owner(sid) || staff(sid); }
+    // gérant : coiffeur à qui le patron confie la caisse de tout le salon et les clients
+    function gerant(sid) { return staff(sid) && get(staffDoc(sid)).data.coiffeurId in salon(sid).get('gerants', []); }
+    function patronOuGerant(sid) { return owner(sid) || gerant(sid); }
     // l'admin peut tout lire (voir un salon comme son patron, pour le support), sans rien modifier
     // un salon suspendu par l'admin ne prend plus de tickets ni de rendez-vous, et sa caisse est fermée
-    function open(sid) { return salon(sid).get('blocked', false) != true; }
+    // suspension immédiate (blocked) ou programmée à une date choisie par l'admin (blockAt, en millisecondes)
+    function open(sid) { return salon(sid).get('blocked', false) != true
+      && (salon(sid).get('blockAt', 0) == 0 || request.time.toMillis() < salon(sid).get('blockAt', 0)); }
     function active(sid) { return open(sid); }
 
     match /salons/{sid} {
@@ -22,15 +31,22 @@ service cloud.firestore {
         && request.resource.data.owner == request.auth.uid
         && request.resource.data.created == request.time && !('blocked' in request.resource.data);
       // le patron ne touche ni à la date de création, ni à la suspension : c'est l'admin
-      allow update: if (owner(sid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['owner', 'created', 'blocked']))
-        || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blocked']));
+      allow update: if (owner(sid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['owner', 'created', 'blocked', 'blockAt', 'claim']))
+        || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blocked', 'blockAt']))
+        // transfert : le nouveau patron reprend le salon avec le code créé par l'admin
+        || (signed() && request.auth.token.firebase.sign_in_provider != 'anonymous'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['owner', 'claim'])
+          && request.resource.data.owner == request.auth.uid
+          && exists(/databases/$(db)/documents/salons/$(sid)/private/transfer)
+          && request.resource.data.claim == get(/databases/$(db)/documents/salons/$(sid)/private/transfer).data.code);
 
-      match /private/{doc} { allow read: if owner(sid) || admin(); allow write: if owner(sid); }
+      // l'admin peut changer le code coiffeur (téléphone perdu) et créer un code de transfert
+      match /private/{doc} { allow read: if owner(sid) || admin(); allow write: if owner(sid) || admin(); }
       match /staff/{uid} {
-        allow read: if owner(sid) || admin() || (signed() && request.auth.uid == uid);
+        allow read: if owner(sid) || voit() || (signed() && request.auth.uid == uid);
         allow create: if signed() && request.auth.uid == uid
           && request.resource.data.code == get(/databases/$(db)/documents/salons/$(sid)/private/config).data.staffCode;
-        allow delete: if owner(sid);
+        allow delete: if owner(sid) || admin();
       }
       match /meta/counter { allow read, write: if signed(); }
       match /queue/{id} {
@@ -43,14 +59,23 @@ service cloud.firestore {
       }
       match /contacts/{id} {
         allow create: if signed();
-        allow read: if team(sid) || admin();
+        allow read: if team(sid) || voit();
         allow update, delete: if team(sid);
       }
       // un coiffeur ne voit que ses propres coupes (idée 66)
+      // le gérant voit et encaisse pour tous les coiffeurs (idée 88)
       match /ventes/{id} {
-        allow read: if admin() || (active(sid) && (owner(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId)));
-        allow update, delete: if active(sid) && (owner(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
-        allow create: if active(sid) && (owner(sid) || (staff(sid) && request.resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
+        allow read: if voit() || (active(sid) && (patronOuGerant(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId)));
+        allow update, delete: if active(sid) && (patronOuGerant(sid) || (staff(sid) && resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
+        allow create: if active(sid) && (patronOuGerant(sid) || (staff(sid) && request.resource.data.coiffeurId == get(staffDoc(sid)).data.coiffeurId));
+      }
+      // coupes à crédit (idée 64)
+      match /credits/{id} { allow read: if team(sid) || voit(); allow write: if team(sid) && active(sid); }
+      // messages entre le patron et l'équipe de l'appli (idées 31, 32)
+      match /messages/{id} {
+        allow read: if owner(sid) || voit();
+        allow create: if (owner(sid) && request.resource.data.from == 'patron') || (voit() && request.resource.data.from == 'equipe');
+        allow update: if (owner(sid) || voit()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lu']);
       }
       // rendez-vous : les créneaux pris sont publics (prénom seulement), le client peut annuler ou reporter le sien
       match /rdv/{id} {
@@ -61,21 +86,42 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'day', 'time']));
         allow delete: if owner(sid);
       }
-      match /clients/{id} { allow read: if team(sid) || admin(); allow write: if team(sid); }
+      match /clients/{id} { allow read: if team(sid) || voit(); allow write: if team(sid); }
       match /pointage/{id} {
         allow read: if true;
         allow write: if team(sid);
       }
-      match /depenses/{id} { allow read: if admin() || (owner(sid) && active(sid)); allow write: if owner(sid) && active(sid); }
-      match /stock/{id} { allow read: if admin() || (owner(sid) && active(sid)); allow write: if owner(sid) && active(sid); }
+      match /depenses/{id} { allow read: if voit() || (owner(sid) && active(sid)); allow write: if owner(sid) && active(sid); }
+      match /stock/{id} { allow read: if voit() || (owner(sid) && active(sid)); allow write: if owner(sid) && active(sid); }
       match /galerie/{id} { allow read: if true; allow write: if owner(sid); }
     }
 
     // erreurs remontées par les téléphones : chacun peut en envoyer, seul l'admin les lit
     match /erreurs/{id} {
       allow create: if signed() && request.resource.data.uid == request.auth.uid && request.resource.data.msg is string && request.resource.data.msg.size() <= 500;
-      allow read, delete: if admin();
+      allow read: if voit();
+      allow delete: if admin();
     }
+
+    // base des numéros : chacun inscrit son numéro, seuls l'admin et ses associés la lisent
+    match /base/{tel} {
+      allow create, update: if signed() && request.resource.data.tel == tel && tel.size() <= 12
+        && request.resource.data.nom is string && request.resource.data.nom.size() <= 40;
+      allow read: if voit();
+      allow delete: if admin();
+    }
+    // invitations : créées par l'admin ; le patron invité note qu'il a ouvert le lien, puis créé son salon
+    match /invitations/{id} {
+      allow read: if voit();
+      allow create, delete: if admin();
+      allow update: if admin() || (signed() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'opened', 'sid']));
+    }
+    // abonnements payés à la main et journal des actions de l'admin
+    match /paiements/{id} { allow read: if voit(); allow write: if admin(); }
+    match /journal/{id} { allow read: if voit(); allow create: if voit() && request.resource.data.by == request.auth.uid; }
+    // chaque téléphone note sa version et son temps de chargement (idée 42)
+    match /appareils/{uid} { allow read: if voit(); allow write: if signed() && request.auth.uid == uid; }
+    match /admin/config { allow read: if voit(); allow write: if admin(); }
 
   }
 }

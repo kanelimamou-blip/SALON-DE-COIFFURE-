@@ -1,5 +1,5 @@
-const CACHE = "salon-v14";
-const SHELL = ["./", "index.html", "app.css", "app.js", "plus.js", "admin.js", "store.js", "config.js", "vendor/qrcode.js", "manifest.webmanifest", "icons/icon-192.png"];
+const CACHE = "salon-v16";
+const SHELL = ["./", "index.html", "app.css", "app.js", "plus.js", "suite.js", "admin.js", "store.js", "config.js", "vendor/qrcode.js", "manifest.webmanifest", "icons/icon-192.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k.startsWith("salon-") && k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });
 // Réseau d'abord, cache si hors ligne : l'appli s'ouvre sans connexion (les polices et Firebase compris)

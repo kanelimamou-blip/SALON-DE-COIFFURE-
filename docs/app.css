@@ -296,3 +296,39 @@ a.dir{color:var(--ink);text-decoration:none}
 /* QR montré au client, en plein écran */
 .qr-full{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;background:rgba(0,0,0,.75)}
 .qr-full .qr-print{background:#fff;color:#121a2b}
+/* suite : pauses, objectif, barres, messages, détail admin, gros boutons */
+.pause-bar{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.chip.on{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.chip.off{opacity:.55}
+.chip.sm{min-height:32px;padding:3px 10px;font-size:.82rem}
+.sc-pause{font-weight:700;color:var(--warn)}
+.pill-ko{background:var(--accent-soft);color:var(--ko)}
+.noir-why{margin:-6px 0 4px 8px}
+.goal{margin:8px 0 12px}.goal-t{display:flex;justify-content:space-between}
+.goal-bar{height:12px;border-radius:999px;background:var(--surface-2);overflow:hidden}.goal-bar i{display:block;height:100%;background:var(--ok)}
+.hbars{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.hbars div{display:grid;grid-template-columns:72px 1fr auto;align-items:center;gap:8px;font-size:.85rem}
+.hbars span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hbars i{display:block;height:12px;min-width:2px;border-radius:6px;background:var(--accent)}
+.pre{white-space:pre-line}
+.week{border:2px solid var(--ok);margin-top:12px}
+.msgs{display:flex;flex-direction:column;gap:8px;margin:8px 0}
+.msg{max-width:85%;padding:8px 12px;border-radius:14px;display:flex;flex-direction:column;gap:2px}
+.msg small{font-size:.72rem;color:var(--muted)}
+.msg.me{align-self:flex-end;background:var(--blue-soft)}.msg.them{align-self:flex-start;background:var(--surface-2)}
+.banner-msg{display:flex;flex-direction:column;gap:2px;border:2px solid var(--blue);text-decoration:none;color:var(--ink)}
+.pin-in{font-size:2rem;letter-spacing:.5em;text-align:center}
+.ad-detail{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px}
+.ad-detail h3{font-size:1.1rem;margin-top:6px}
+.spark{width:100%;height:auto;max-height:110px}.spark text{font-size:8px;fill:var(--muted)}
+.ad-tabs2{margin:16px 0 10px}
+.ad-map{height:320px;border-radius:12px;overflow:hidden;background:var(--surface-2)}
+.funnel{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px}
+.funnel div{background:var(--surface-2);border-radius:12px;padding:10px;display:flex;flex-direction:column}
+.funnel b{font:900 1.8rem var(--f-display)}.funnel span{font-size:.85rem;color:var(--muted)}
+body.big-ui .btn,body.big-ui .btn-ghost,body.big-ui .chip{min-height:60px;font-size:1.15rem;padding-left:18px;padding-right:18px}
+body.big-ui .btn.sm,body.big-ui .btn-ghost.sm{min-height:54px;font-size:1.05rem}
+body.big-ui .q-item .num{font-size:2.4rem}
+body.big-ui .svc{min-height:110px;font-size:1.15rem}
+.row.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.news ul{margin:8px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
