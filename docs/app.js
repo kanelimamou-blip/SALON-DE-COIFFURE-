@@ -52,15 +52,20 @@ const WO = {
 const t = (fr) => (ME.lang === "wo" && WO[fr]) || fr;
 
 // ---------- Salon suivi en direct
-const LIVE = { sid: null, salon: null, queue: [], ventes: [], depenses: [], stock: [], pointage: [], contacts: {}, subs: [] };
+const LIVE = { sid: null, salon: null, queue: [], ventes: [], depenses: [], stock: [], pointage: [], contacts: {}, noirs: {}, messages: [], subs: [] };
 function follow(sid, role) {
   const key = sid + "|" + role;
   if (LIVE.key === key) return;
   LIVE.subs.forEach((f) => f && f());
-  Object.assign(LIVE, { key, sid, salon: null, queue: [], ventes: [], depenses: [], stock: [], pointage: [], contacts: {}, subs: [] });
+  Object.assign(LIVE, { key, sid, salon: null, queue: [], ventes: [], depenses: [], stock: [], pointage: [], contacts: {}, noirs: {}, messages: [], subs: [] });
   const on = (k) => (v) => { LIVE[k] = v; refresh(); };
   const today = dayOf();
-  LIVE.subs.push(Store.watchSalon(sid, (v) => { LIVE.salon = v; tabs(document.body.dataset.route); if (window.demoBar) demoBar(); refresh(); }));
+  LIVE.subs.push(Store.watchSalon(sid, (v) => {
+    LIVE.salon = v;
+    // le patron vient de nommer (ou de retirer) ce coiffeur gérant : on recharge la caisse qui va avec
+    if (v && role === "coiffeur" && !!ME.gerant !== isGerant()) { ME.gerant = isGerant(); saveMe(); LIVE.key = null; follow(sid, role); return render(); }
+    tabs(document.body.dataset.route); if (window.demoBar) demoBar(); refresh();
+  }));
   LIVE.subs.push(Store.watch(sid, "queue", [["day", "==", today]], on("queue")));
   LIVE.subs.push(Store.watch(sid, "pointage", [["day", "==", today]], on("pointage")));
   if (role === "patron") {
@@ -69,7 +74,13 @@ function follow(sid, role) {
     LIVE.subs.push(Store.watch(sid, "depenses", [["day", ">=", from]], on("depenses")));
     LIVE.subs.push(Store.watch(sid, "stock", [], on("stock")));
   }
-  if (role === "coiffeur") LIVE.subs.push(Store.watch(sid, "ventes", [["coiffeurId", "==", ME.coiffeurId]], on("ventes")));
+  // le gérant (idée 88) voit la caisse de tout le salon ; un coiffeur seulement ses coupes
+  if (role === "coiffeur" && ME.gerant) LIVE.subs.push(Store.watch(sid, "ventes", [["day", ">=", dayOf().slice(0, 7) + "-01"]], on("ventes")));
+  else if (role === "coiffeur") LIVE.subs.push(Store.watch(sid, "ventes", [["coiffeurId", "==", ME.coiffeurId]], on("ventes")));
+  // liste noire (idée 79) : clients signalés par le salon, repérés dans la file par leur numéro
+  if (role === "patron" || role === "coiffeur") LIVE.subs.push(Store.watch(sid, "clients", [["noir", "==", true]], (rows) => { LIVE.noirs = Object.fromEntries(rows.map((r) => [r.id, r.noirWhy || "liste noire"])); refresh(); }));
+  // messages de l'équipe de l'appli (idée 31)
+  if (role === "patron") LIVE.subs.push(Store.watch(sid, "messages", [], (rows) => { LIVE.messages = rows.sort((a, b) => a.at - b.at); tabs(document.body.dataset.route); refresh(); }));
   if (role === "patron" || role === "coiffeur") LIVE.subs.push(Store.watch(sid, "contacts", [["day", "==", today]], (rows) => { LIVE.contacts = Object.fromEntries(rows.map((r) => [r.id, r.phone])); refresh(); }));
 }
 
@@ -78,9 +89,11 @@ const coiffeurs = () => (LIVE.salon && LIVE.salon.coiffeurs) || [];
 const svcOf = (id) => services().find((s) => s.id === id) || { name: "Coupe", price: 0, dur: 20 };
 const coifOf = (id) => coiffeurs().find((c) => c.id === id);
 const isStaff = () => ME.role === "patron" || ME.role === "coiffeur";
+// gérant : coiffeur à qui le patron confie la caisse et les clients (idée 88)
+const isGerant = () => ME.role === "coiffeur" && !!LIVE.salon && (LIVE.salon.gerants || []).includes(ME.coiffeurId);
 
 // ---------- Salon suspendu par l'équipe de l'appli (espace admin) : le paiement de l'abonnement se fait hors de l'appli
-const unlocked = (s) => !!s && !s.blocked;
+const unlocked = (s) => !!s && !s.blocked && !(s.blockAt && Date.now() >= s.blockAt);
 
 // ---------- Attente estimée (idée 8) : chaque coiffeur présent prend le suivant, selon la durée des coupes
 function present() {
@@ -94,7 +107,8 @@ const waiting = () => LIVE.queue.filter((e) => e.status === "attente" || e.statu
 const inChair = () => LIVE.queue.filter((e) => e.status === "fauteuil").sort((a, b) => a.num - b.num);
 function estimate() {
   const now = Date.now();
-  const free = Object.fromEntries(present().map((c) => [c.id, 0]));
+  // un coiffeur en pause (idée 94) reprend à la fin de sa pause
+  const free = Object.fromEntries(present().map((c) => [c.id, Math.max(0, (pauseOf(c.id) - now) / 6e4)]));
   inChair().forEach((e) => {
     const k = e.coiffeurId in free ? e.coiffeurId : Object.keys(free).sort((a, b) => free[a] - free[b])[0];
     free[k] = Math.max(free[k], 2, svcOf(e.serviceId).dur - (now - (e.startedAt || now)) / 6e4);
@@ -109,6 +123,7 @@ function estimate() {
   out._next = Math.round(Math.min(...Object.values(free)));
   return out;
 }
+function pauseOf(cid) { const p = LIVE.pointage.find((x) => x.coiffeurId === cid && x.in && !x.out); return p && p.pauseUntil > Date.now() ? p.pauseUntil : 0; }
 const waitLabel = (m) => m < 1 ? "maintenant" : m < 60 ? `${m} ${t("min")}` : `${Math.floor(m / 60)} h ${pad(m % 60)}`;
 
 // ---------- Petits outils d'interface
@@ -176,11 +191,14 @@ function render() {
   releaseWake();
   let route = ROUTES[r] ? r : "accueil";
   if (STAFF_ROUTES.includes(route) && !(isStaff() && ME.sid)) route = "accueil";
-  if (["bilan", "salon", "clients", "offres"].includes(route) && ME.role !== "patron") route = "file";
+  if (["bilan", "salon", "clients", "offres"].includes(route) && ME.role !== "patron" && !(route === "clients" && isGerant())) route = "file";
+  document.body.classList.toggle("big-ui", !!ME.big);
   if (isStaff() && ME.sid) follow(ME.sid, ME.role);
   tabs(route);
   if (window.demoBar) demoBar();
   $("#adm-link").hidden = !(typeof isAdmin === "function" && isAdmin()) || route === "admin";
+  // verrou du téléphone du patron (idée 96) : la caisse, le bilan et les réglages demandent son code
+  if (ME.role === "patron" && ["caisse", "bilan", "salon", "clients"].includes(route) && pinLocked()) return pinScreen(route, arg);
   ROUTES[route](arg ? decodeURIComponent(arg) : "");
   $view.focus({ preventScroll: true });
   window.scrollTo(0, 0);
@@ -194,9 +212,9 @@ function tabs(route) {
   const T = { file: ["File", "M4 6h16M4 12h16M4 18h10"], rdv: ["RDV", "M4 5h16v15H4zM4 10h16M9 3v4M15 3v4"], caisse: ["Caisse", "M3 7h18v12H3zM3 11h18M7 15h3"], bilan: ["Bilan", "M4 20V10M10 20V4M16 20v-7M22 20H2"],
     clients: ["Clients", "M9 11a4 4 0 1 0 0-8a4 4 0 0 0 0 8M2 21v-1a7 7 0 0 1 14 0v1M17 11a3 3 0 1 0 0-6M22 21v-1a5 5 0 0 0-4-5"], salon: ["Salon", "M12 3l9 7v11H3V10zM9 21v-6h6v6"], pointage: ["Pointage", "M12 7v5l3 2M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18"] };
   const simple = LIVE.salon && LIVE.salon.simple;
-  const keys = ME.role === "patron" ? (simple ? ["caisse", "bilan", "clients", "salon"] : ["file", "rdv", "caisse", "bilan", "salon"]) : ["file", "rdv", "caisse", "pointage"];
-  const items = keys.map((k) => [k, k === "caisse" && ME.role === "coiffeur" ? "Mes coupes" : T[k][0], T[k][1]]);
-  const low = ME.role === "patron" ? LIVE.stock.filter((s) => s.qty <= (s.min || 0)).length : 0;
+  const keys = ME.role === "patron" ? (simple ? ["caisse", "bilan", "clients", "salon"] : ["file", "rdv", "caisse", "bilan", "salon"]) : isGerant() ? ["file", "rdv", "caisse", "clients", "pointage"] : ["file", "rdv", "caisse", "pointage"];
+  const items = keys.map((k) => [k, k === "caisse" && ME.role === "coiffeur" && !isGerant() ? "Mes coupes" : T[k][0], T[k][1]]);
+  const low = ME.role === "patron" ? LIVE.stock.filter((s) => s.qty <= (s.min || 0)).length + LIVE.messages.filter((m) => m.from === "equipe" && !m.lu).length : 0;
   nav.innerHTML = items.map(([h, l, d]) => `<a href="#${h}"${route === h || (h === "salon" && route === "offres") || (h === "clients" && route === "clients") ? ' aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span>${h === "salon" && low ? `<i class="badge">${low}</i>` : ""}</a>`).join("");
 }
 
@@ -236,8 +254,10 @@ ROUTES.accueil = () => {
 
 // ---------- Invitation d'un nouveau patron (lien ou QR code créé dans l'espace admin) : son salon est prérempli
 ROUTES.invite = (data) => {
-  try { const o = JSON.parse(data); ME.invite = { n: String(o.n || "").slice(0, 40), q: String(o.q || "").slice(0, 50), t: String(o.t || "").slice(0, 20), c: String(o.c || "").slice(0, 120) }; }
+  try { const o = JSON.parse(data); ME.invite = { n: String(o.n || "").slice(0, 40), q: String(o.q || "").slice(0, 50), t: String(o.t || "").slice(0, 20), c: String(o.c || "").slice(0, 120), i: String(o.i || "").slice(0, 30) }; }
   catch (e) { ME.invite = null; }
+  // suivi des invitations (idée 21) : l'admin voit que le lien a été ouvert
+  if (ME.invite && ME.invite.i) Store.ensureUser().then(() => Store.updateTop("invitations", ME.invite.i, { status: "ouverte", opened: Date.now() })).catch(() => {});
   Object.assign(ME, { role: null, sid: null }); saveMe();
   go("demarrer");
 };
@@ -275,6 +295,12 @@ ROUTES.demarrer = async (mode) => {
       Store.signInEmail($("#em-mail").value.trim(), $("#em-pass").value, mode === "new").then(render, (er) => { $("#em-msg").className = "small msg-ko"; $("#em-msg").textContent = /wrong-password|invalid-cred|user-not-found/.test(er.code) ? "E-mail ou mot de passe incorrect." : /email-already/.test(er.code) ? "Ce compte existe déjà : appuie sur Se connecter." : "Connexion impossible. Vérifie le réseau."; }); };
     return;
   }
+  // reprise d'un salon (idée 36) : lien de transfert créé par l'admin
+  if (ME.reprendre) {
+    const [sid, code] = ME.reprendre.split("-"); ME.reprendre = null; saveMe();
+    try { await Store.claimSalon(sid, code); Object.assign(ME, { role: "patron", sid }); saveMe(); toast("Le salon est maintenant à toi"); return go("salon"); }
+    catch (e) { toast("Ce lien de transfert n'est plus valable. Demande-en un nouveau."); }
+  }
   // le propriétaire de l'appli qui vient de se connecter va sur son espace admin
   if (typeof isAdmin === "function" && isAdmin() && !ME.invite) return go("admin");
   const inv = ME.invite || {};
@@ -282,24 +308,31 @@ ROUTES.demarrer = async (mode) => {
   // « Se connecter » de l'accueil : le patron d'un seul salon arrive directement dans son salon
   if (mode === "auto" && mine.length === 1 && !ME.invite) { Object.assign(ME, { role: "patron", sid: mine[0].id }); saveMe(); return go("file"); }
   $view.innerHTML = `${ME.invite ? installCard() : ""}<h1>Mon salon</h1>
-    ${mine.length ? `<div class="card"><h2>Mes salons</h2>${mine.map((s) => `<button class="line-btn" data-sid="${esc(s.id)}" type="button"><b>${esc(s.name)}</b><span class="muted small">${esc(s.quartier || "")} · code ${esc(s.id)}</span></button>`).join("")}</div>` : ""}
+    ${mine.length ? `<div class="card"><h2>Mes salons</h2>${mine.map((s) => `<button class="line-btn" data-sid="${esc(s.id)}" type="button"><b>${esc(s.name)}</b><span class="muted small">${esc(s.quartier || "")} · code ${esc(s.id)}</span></button>`).join("")}</div>` : ""}<div id="cmp"></div>
     <form class="card" id="new" data-keep><h2>${mine.length ? "Ajouter un salon" : "Créer mon salon"}</h2>${inv.n ? `<p class="small muted">Tes informations sont déjà remplies : vérifie-les, puis crée le salon.</p>` : ""}
       <label class="lbl" for="n-name">Nom du salon</label><input class="field" id="n-name" required maxlength="40" placeholder="Ex. Salon Teranga" value="${esc(inv.n || "")}">
       <label class="lbl" for="n-q">Quartier et ville</label><input class="field" id="n-q" maxlength="50" placeholder="Ex. Médina, Dakar" value="${esc(inv.q || "")}">
-      <label class="lbl" for="n-tel">Numéro WhatsApp du salon</label><input class="field" id="n-tel" inputmode="tel" maxlength="20" placeholder="Ex. 77 123 45 67" value="${esc(inv.t || "")}">
+      <label class="lbl" for="n-tel">Ton numéro WhatsApp</label><input class="field" id="n-tel" inputmode="tel" maxlength="20" required pattern="[0-9 +.]{9,20}" placeholder="Ex. 77 123 45 67" value="${esc(inv.t || "")}">
       <label class="lbl" for="n-coif">Prénoms des coiffeurs (séparés par des virgules)</label><input class="field" id="n-coif" maxlength="120" placeholder="Ex. Modou, Ibou, Pape" value="${esc(inv.c || "")}">
       <button class="btn">Créer le salon</button></form>`;
   $$("[data-sid]").forEach((b) => (b.onclick = () => { Object.assign(ME, { role: "patron", sid: b.dataset.sid }); saveMe(); go("file"); }));
+  compareSalons(mine);
   bindInstall();
   $("#new").onsubmit = async (e) => {
     e.preventDefault();
     const names = $("#n-coif").value.split(",").map((s) => s.trim()).filter(Boolean);
     const data = { name: $("#n-name").value.trim(), quartier: $("#n-q").value.trim(), tel: $("#n-tel").value.trim(), open: true,
       services: defaultServices(), coiffeurs: (names.length ? names : ["Patron"]).map((n) => ({ id: uid(), name: n, pct: 40 })) };
-    try { const sid = await Store.createSalon(data); Object.assign(ME, { role: "patron", sid, invite: null }); saveMe(); toast("Salon créé"); go("salon"); }
+    try {
+      const sid = await Store.createSalon(data);
+      Store.inscrire(data.tel, data.name, "patron", sid);
+      if (inv.i) Store.updateTop("invitations", inv.i, { status: "salon", sid }).catch(() => {});
+      Object.assign(ME, { role: "patron", sid, invite: null }); saveMe(); toast("Salon créé"); go("salon");
+    }
     catch (er) { toast("Création impossible. Vérifie le réseau."); }
   };
 };
+ROUTES.reprendre = (arg) => { ME.reprendre = String(arg || "").toUpperCase(); Object.assign(ME, { role: null, sid: null }); saveMe(); go("demarrer"); };
 const defaultServices = () => [
   ["Dégradé", 1500, 25], ["Boule à zéro", 1000, 15], ["Barbe", 500, 10], ["Coupe et barbe", 2000, 35], ["Teinture", 2500, 40], ["Coupe enfant", 1000, 20],
 ].map(([name, price, dur]) => ({ id: uid(), name, price, dur, photo: "" }));
@@ -383,18 +416,19 @@ ROUTES.file = () => {
     const est = estimate(), w = waiting(), last = est._next;
     $("#f-head").innerHTML = `<div class="head-row"><div><h1>${esc(s.name)}</h1><p class="muted small">Code du salon <b class="code">${esc(s.id)}</b></p></div>
       ${ME.role === "patron" ? `<button type="button" class="open-tog ${s.open ? "on" : ""}" id="tog" aria-pressed="${!!s.open}">${s.open ? "Ouvert" : "Fermé"}</button>` : `<span class="open-tog ${s.open ? "on" : ""}">${s.open ? "Ouvert" : "Fermé"}</span>`}</div>
-      <div class="kpis"><div><b>${w.length}</b><span>en attente</span></div><div><b>${waitLabel(last)}</b><span>pour un nouveau client</span></div><div><b>${present().filter((c) => c.id !== "_").length}</b><span>coiffeurs présents</span></div></div>`;
+      <div class="kpis"><div><b>${w.length}</b><span>en attente</span></div><div><b>${waitLabel(last)}</b><span>pour un nouveau client</span></div><div><b>${present().filter((c) => c.id !== "_").length}</b><span>coiffeurs présents</span></div></div>
+      ${pauseBar()}${weekReportBanner(s)}`;
     const tog = $("#tog"); if (tog) tog.onclick = () => Store.updateSalon(ME.sid, { open: !s.open });
     const row = (e, extra) => {
-      const sv = svcOf(e.serviceId), c = coifOf(e.coiffeurId), phone = LIVE.contacts[e.id];
+      const sv = svcOf(e.serviceId), c = coifOf(e.coiffeurId), phone = LIVE.contacts[e.id], noir = phone && LIVE.noirs[phoneKey(phone)];
       return `<div class="q-item st-${e.status}" data-id="${esc(e.id)}"><span class="num">${e.num}</span>
-        <div class="q-main"><b>${esc(e.name)}${e.rdv ? ` <span class="pill">RDV</span>` : ""}${e.express ? ` <span class="pill">Express</span>` : ""}</b><span class="small muted">${esc(sv.name)}${c ? " · " + esc(c.name) : ""}${e.walkin ? "" : " · ticket à distance"}</span>${extra || ""}</div>
+        <div class="q-main"><b>${esc(e.name)}${e.rdv ? ` <span class="pill">RDV</span>` : ""}${e.express ? ` <span class="pill">Express</span>` : ""}${noir ? ` <span class="pill pill-ko">⚠ ${esc(noir)}</span>` : ""}</b><span class="small muted">${esc(sv.name)}${c ? " · " + esc(c.name) : ""}${e.walkin ? "" : " · ticket à distance"}</span>${extra || ""}</div>
         <div class="q-act">${actions(e, phone)}</div></div>`;
     };
     const actions = (e, phone) => {
-      if (e.status === "fauteuil") return `<button class="btn sm" data-a="fini" type="button">Terminé</button>`;
+      if (e.status === "fauteuil") return `<button class="btn sm" data-a="fini" type="button">Terminé</button><button class="btn-ghost sm" data-a="avant" type="button">${e.avant ? "Photo avant ✓" : "Photo avant"}</button>`;
       if (e.status === "parti") return "";
-      if (e.status === "fini") return `<button class="btn-ghost sm" data-a="photo" type="button">${e.photo ? "Changer la photo" : "Photo"}</button>`;
+      if (e.status === "fini") return `<button class="btn-ghost sm" data-a="photo" type="button">${e.photo ? "Changer la photo" : "Photo après"}</button>${e.photo && ME.role === "patron" ? `<button class="btn-ghost sm" data-a="galerie" type="button">${e.inGal ? "Dans la galerie ✓" : "Mettre dans la galerie"}</button>` : ""}`;
       return `${e.status === "attente" ? `<button class="btn sm alt" data-a="appel" type="button">Appeler</button>` : ""}<button class="btn sm" data-a="chair" type="button">Au fauteuil</button>
         <button class="btn-ghost sm" data-a="parti" type="button" aria-label="Le client est parti">Parti</button>
         ${phone ? `<a class="btn-ghost sm" target="_blank" rel="noopener" href="${waLink(phone, `Bonjour ${e.name}, ici ${s.name}. Ton tour arrive dans 10 minutes (ticket n° ${e.num}).`)}">WhatsApp</a>` : ""}`;
@@ -411,21 +445,28 @@ ROUTES.file = () => {
     const a = b.dataset.a;
     // photo avant / après envoyée dans l'historique du client (idée 48)
     if (a === "photo") { const inp = $("#f-photo"); inp.onchange = async () => { const f = inp.files[0]; if (!f) return; const img = await shrink(f, 480, 0.6); Store.update(ME.sid, "queue", e.id, { photo: img }); if (LIVE.contacts[e.id]) saveClientPhoto(LIVE.contacts[e.id], img); inp.value = ""; toast("Photo ajoutée à l'historique du client"); }; inp.click(); return; }
+    // photo avant la coupe, puis avant / après côte à côte dans la galerie (idée 97)
+    if (a === "avant") { const inp = $("#f-photo"); inp.onchange = async () => { const f = inp.files[0]; if (!f) return; Store.update(ME.sid, "queue", e.id, { avant: await shrink(f, 480, 0.6) }); inp.value = ""; toast("Photo avant enregistrée"); }; inp.click(); return; }
+    if (a === "galerie") { if (e.inGal) return; await Store.add(ME.sid, "galerie", { at: Date.now(), img: e.avant ? await beforeAfter(e.avant, e.photo) : e.photo }); Store.update(ME.sid, "queue", e.id, { inGal: true }); toast("Ajoutée à la galerie du salon"); return; }
     if (a === "appel") Store.update(ME.sid, "queue", e.id, { status: "appele", calledAt: Date.now() });
     if (a === "parti") { Store.update(ME.sid, "queue", e.id, { status: "parti" }); toast(`N° ${e.num} retiré de la file`, () => Store.update(ME.sid, "queue", e.id, { status: "attente" })); }
     if (a === "chair") {
-      let c = ME.role === "coiffeur" ? ME.coiffeurId : e.coiffeurId;
+      let c = ME.role === "coiffeur" ? ME.coiffeurId : e.coiffeurId || (LIVE.salon.patronCoif && present().some((x) => x.id === LIVE.salon.patronCoif) && coiffeurs().length === 1 ? LIVE.salon.patronCoif : null);
       if (!c && coiffeurs().length > 1) c = await sheet(`Qui coiffe ${e.name} ?`, present().filter((x) => x.id !== "_").concat(coiffeurs().filter((x) => !present().includes(x))).map((x) => ({ label: x.name, value: x.id })));
       if (!c && coiffeurs().length === 1) c = coiffeurs()[0].id;
       if (!c) return;
       Store.update(ME.sid, "queue", e.id, { status: "fauteuil", coiffeurId: c, startedAt: Date.now() });
+      // le patron se met à couper : son téléphone se verrouille (idée 96)
+      if (ME.role === "patron" && c === LIVE.salon.patronCoif) pinRelock();
     }
     if (a === "fini") {
       const sv = svcOf(e.serviceId);
-      const pay = await sheet(`${e.name} · ${sv.name} · ${fcfa(sv.price)} : payé comment ?`, Object.entries(PAY).map(([k, l]) => ({ label: l, value: k, cls: k === "cash" ? "" : "alt" })).concat([{ label: "Pas encaissé", value: "none", cls: "btn-ghost" }]));
+      const pay = await sheet(`${e.name} · ${sv.name} · ${fcfa(sv.price)} : payé comment ?`, Object.entries(PAY).map(([k, l]) => ({ label: l, value: k, cls: k === "cash" ? "" : "alt" })).concat([{ label: "À crédit (paiera plus tard)", value: "credit", cls: "alt" }, { label: "Pas encaissé", value: "none", cls: "btn-ghost" }]));
       if (!pay) return;
       Store.update(ME.sid, "queue", e.id, { status: "fini", endedAt: Date.now() });
       if (LIVE.contacts[e.id]) saveClient(LIVE.contacts[e.id], e.name, sv.name);
+      // crédit client (idée 64) : la dette est suivie dans Clients, la vente compte le jour où il paie
+      if (pay === "credit") { await Store.add(ME.sid, "credits", { day: dayOf(), at: Date.now(), name: e.name, phone: LIVE.contacts[e.id] || "", serviceId: sv.id, svc: sv.name, amount: sv.price, coiffeurId: e.coiffeurId || null, paid: false }); toast(`${fcfa(sv.price)} à crédit pour ${e.name}`); return; }
       if (pay !== "none") {
         const vid = await addVente(sv, e.coiffeurId, pay, e.id);
         toast(`${fcfa(sv.price)} encaissés (${PAY[pay]})`, () => { Store.remove(ME.sid, "ventes", vid); Store.update(ME.sid, "queue", e.id, { status: "fauteuil" }); });
@@ -451,11 +492,11 @@ ROUTES.caisse = () => {
   refreshFn = () => {
     const s = LIVE.salon; if (!s) return;
     if (!unlocked(s)) return locked("Caisse");
-    const mine = ME.role === "coiffeur";
+    const mine = ME.role === "coiffeur" && !isGerant();
     if (!built) {
       built = true;
       ME.coif = mine ? ME.coiffeurId : coifOf(ME.coif) ? ME.coif : (coiffeurs()[0] || {}).id;
-      $view.innerHTML = `<h1>${mine ? "Mes coupes" : "Caisse du jour"}</h1>
+      $view.innerHTML = `<h1>${mine ? "Mes coupes" : "Caisse du jour"}</h1><div id="c-obj"></div>
         ${mine ? "" : `<div class="pick"><span class="lbl">Coiffeur</span><div class="chips" id="c-coif"></div></div>`}
         <div class="pick"><span class="lbl">Paiement</span><div class="chips" id="c-pay">${Object.entries(PAY).map(([k, l]) => `<button type="button" class="chip pay-${k}" data-p="${k}">${l}</button>`).join("")}</div></div>
         <p class="small muted">Touche une coupe pour l'encaisser.</p>
@@ -484,6 +525,7 @@ ROUTES.caisse = () => {
     $("#c-tot").innerHTML = `<div class="kpis big"><div><b>${fcfa(sum(td))}</b><span>aujourd'hui · ${td.length} coupe${td.length > 1 ? "s" : ""}</span></div><div><b>${fcfa(sum(mo))}</b><span>en ${MOIS[+month.slice(5) - 1]}</span></div>
       ${mine && me ? `<div><b>${fcfa(sum(mo) * (me.pct || 0) / 100)}</b><span>ma part du mois (${me.pct} %)</span></div>` : ""}</div>
       ${mine ? "" : `<div class="pay-split">${Object.entries(PAY).map(([k, l]) => `<span class="pay-${k}"><i></i>${l} <b>${fcfa(sum(td.filter((v) => v.pay === k)))}</b></span>`).join("")}</div>`}`;
+    if (ME.role === "patron") $("#c-obj").innerHTML = goalBar(s, sum(mo));
     $("#c-list").innerHTML = td.length ? td.map((v) => `<div class="v-item"><span class="small muted tab">${hm(v.at)}</span><div class="q-main"><b>${esc(v.name)}</b><span class="small muted">${esc((coifOf(v.coiffeurId) || {}).name || "")} · ${PAY[v.pay] || ""}</span></div><b class="tab">${fcfa(v.price)}</b>${mine && v.by !== Store.uid ? "" : `<button type="button" class="btn-ghost sm" data-del="${esc(v.id)}" aria-label="Supprimer">✕</button>`}</div>`).join("") : `<p class="empty">Aucune coupe encaissée aujourd'hui.</p>`;
   };
   refresh();
@@ -494,7 +536,8 @@ function pointageHtml(list) {
   const today = dayOf();
   return list.map((c) => {
     const p = LIVE.pointage.find((x) => x.coiffeurId === c.id) || {};
-    return `<div class="v-item"><div class="q-main"><b>${esc(c.name)}</b><span class="small muted">${p.in ? "Arrivé à " + hm(p.in) : "Pas encore arrivé"}${p.out ? " · parti à " + hm(p.out) : ""}</span></div>
+    const late = p.in ? lateMin(c, p.in) : 0;
+    return `<div class="v-item"><div class="q-main"><b>${esc(c.name)}</b><span class="small muted">${p.in ? "Arrivé à " + hm(p.in) : "Pas encore arrivé"}${p.out ? " · parti à " + hm(p.out) : ""}</span>${late > 0 ? `<span class="small warn">${late} min de retard (prévu à ${esc(startOf(c))})</span>` : ""}</div>
       ${!p.in ? `<button type="button" class="btn sm" data-in="${esc(c.id)}">Arrivé</button>` : !p.out ? `<button type="button" class="btn sm alt" data-out="${esc(c.id)}">Parti</button>` : `<span class="small muted">Journée finie</span>`}</div>`;
   }).join("") + `<input type="hidden" value="${today}">`;
 }
@@ -528,7 +571,7 @@ ROUTES.bilan = (arg) => {
       const next = shiftMonth(month, 1), cur = dayOf().slice(0, 7);
       $view.innerHTML = `<div class="head-row"><h1>Bilan de ${monthLabel(month)}</h1></div>
         <div class="row month-nav"><a class="btn-ghost sm" href="#bilan/${shiftMonth(month, -1)}">← ${monthLabel(shiftMonth(month, -1))}</a>${next <= cur ? `<a class="btn-ghost sm" href="#bilan/${next}">${monthLabel(next)} →</a>` : ""}</div>
-        <div id="b-kpi"></div>
+        <div id="b-kpi"></div><div id="b-plus"></div>
         <section class="card"><h2>Recette et dépenses par jour</h2><div id="b-chart" class="chart"></div></section>
         <section class="card"><h2>Par coiffeur</h2><div class="tbl-wrap"><table class="tbl" id="b-coif"></table></div><p class="small muted">La part est calculée avec la commission de chaque coiffeur (Salon, rubrique Coiffeurs).</p></section>
         <section class="card"><h2>Dépenses</h2>
@@ -554,6 +597,7 @@ ROUTES.bilan = (arg) => {
     $("#b-kpi").innerHTML = `<div class="kpis big"><div><b>${fcfa(rec)}</b><span>recette · ${V.length} coupes</span></div><div><b>${fcfa(comm)}</b><span>parts des coiffeurs</span></div><div><b>${fcfa(dep)}</b><span>dépenses</span></div>
       <div class="${ben >= 0 ? "pos" : "neg"}"><b>${fcfa(ben)}</b><span>bénéfice du salon</span></div></div>`;
     $("#b-chart").innerHTML = chart(month, V, D);
+    bilanPlus(month, V, D, rec);
     $("#b-coif").innerHTML = `<thead><tr><th>Coiffeur</th><th>Coupes</th><th>Recette</th><th>Sa part</th><th>Pour le salon</th></tr></thead><tbody>${parts.map((p) => `<tr><td>${esc(p.c.name)} <span class="muted small">${p.c.pct} %</span></td><td>${p.n}</td><td>${fcfa(p.r)}</td><td>${fcfa(p.part)}</td><td>${fcfa(p.r - p.part)}</td></tr>`).join("")}</tbody>`;
     $("#d-list").innerHTML = D.length ? D.sort((a, b) => b.day.localeCompare(a.day) || b.at - a.at).map((d) => `<div class="v-item"><span class="small muted tab">${d.day.slice(8)}/${d.day.slice(5, 7)}</span><div class="q-main"><b>${esc(d.cat)}</b><span class="small muted">${esc(d.note || "")}</span></div><b class="tab">${fcfa(d.amount)}</b><button type="button" class="btn-ghost sm" data-del="${esc(d.id)}" aria-label="Supprimer">✕</button></div>`).join("") : `<p class="empty">Aucune dépense ce mois-ci.</p>`;
   };
@@ -585,7 +629,8 @@ ROUTES.salon = (part) => {
     if (!built) {
       built = true;
       $view.innerHTML = `<div id="s-root" class="stack-l"><h1>Salon</h1>
-        <div class="quick"><a class="btn alt" href="#clients">Mes clients</a><a class="btn alt" href="#offres">Offres de fêtes</a><a class="btn alt" href="#page/${esc(ME.sid)}">Page du salon</a><a class="btn alt" href="#demarrer">Mes salons</a></div>
+        <div class="quick"><a class="btn alt" href="#clients">Mes clients</a><a class="btn alt" href="#offres">Offres de fêtes</a><a class="btn alt" href="#page/${esc(ME.sid)}">Page du salon</a><a class="btn alt" href="#demarrer">Mes salons</a><a class="btn alt" href="#aide">J'ai un problème</a></div>
+        <div id="s-msg"></div>
         <details class="card" id="d-qr" open><summary><h2>QR code et écran d'attente</h2></summary><div id="s-qr"></div></details>
         <details class="card" id="d-svc"><summary><h2>Coupes et prix</h2></summary><div id="s-svc" class="list"></div><button class="btn alt" type="button" id="svc-add">Ajouter une coupe</button></details>
         <details class="card" id="d-coif"><summary><h2>Coiffeurs et pointage</h2></summary><div id="s-coif"></div><h3>Aujourd'hui</h3><div id="s-pt"></div><div id="s-code"></div></details>
@@ -607,7 +652,8 @@ ROUTES.salon = (part) => {
             <label class="sw">Acompte pour les grandes occasions <input class="field num-f" id="o-acc" inputmode="numeric" aria-label="Acompte"> F</label>
             <label class="sw"><input type="checkbox" id="o-simple"> Mode simple : caisse et bilan seulement (coiffeur seul ou ambulant)</label>
           </div></details>
-        <details class="card"><summary><h2>Ce téléphone</h2></summary><div id="s-me"></div></details></div>`;
+        <details class="card" id="d-ferm"><summary><h2>Fermetures et Ramadan</h2></summary><div id="s-ferm"></div></details>
+        <details class="card"><summary><h2>Ce téléphone</h2></summary><div id="s-me"></div><div id="s-phone"></div></details></div>`;
       $("#svc-add").onclick = () => { const list = services().concat({ id: uid(), name: "Nouvelle coupe", price: 1000, dur: 20, photo: "" }); Store.updateSalon(ME.sid, { services: list }); };
       $("#s-info").onsubmit = (e) => { e.preventDefault(); Store.updateSalon(ME.sid, { name: $("#i-name").value.trim() || s.name, quartier: $("#i-q").value.trim(), tel: $("#i-tel").value.trim(), ouverture: $("#i-open").value || "09:00", fermeture: $("#i-close").value || "21:00", horaires: $("#i-hor").value.trim() }); toast("Enregistré"); };
       $("#o-ann").onchange = (e) => Store.updateSalon(ME.sid, { annuaire: e.target.checked });
@@ -618,6 +664,7 @@ ROUTES.salon = (part) => {
       $("#o-pos").onclick = () => { if (!navigator.geolocation) return toast("Position indisponible."); toast("Recherche de la position…"); navigator.geolocation.getCurrentPosition((p) => { Store.updateSalon(ME.sid, { lat: +p.coords.latitude.toFixed(5), lng: +p.coords.longitude.toFixed(5) }); toast("Position enregistrée"); }, () => toast("Position refusée : autorise-la dans le navigateur."), { enableHighAccuracy: true, timeout: 15000 }); };
       $("#st-add").onsubmit = (e) => { e.preventDefault(); Store.add(ME.sid, "stock", { name: $("#st-name").value.trim(), qty: 0, min: +$("#st-min").value || 0 }); $("#st-name").value = ""; $("#st-min").value = ""; };
       bindSalonEdits();
+      bindSalonPlus();
       bindPointage($("#s-pt"));
       $("#gal-f").onchange = async (e) => { const f = e.target.files[0]; if (f) { await Store.add(ME.sid, "galerie", { at: Date.now(), img: await shrink(f, 640, 0.6) }); e.target.value = ""; toast("Photo ajoutée"); } };
       $("#s-gal").onclick = (e) => { const b = e.target.closest("[data-gd]"); if (b) Store.remove(ME.sid, "galerie", b.dataset.gd); };
@@ -646,7 +693,11 @@ ROUTES.salon = (part) => {
         <label class="sw small"><input type="checkbox" data-f="express"${sv.express ? " checked" : ""}> Express (passe en priorité, ex. barbe seule)</label></div></div>`).join("");
     $("#s-coif").innerHTML = coiffeurs().map((c) => `<div class="svc-edit" data-co="${esc(c.id)}" data-keep><div class="svc-fields"><div class="row">
         <input class="field" data-f="name" value="${esc(c.name)}" maxlength="25" aria-label="Prénom"><label class="mini"><input class="field" data-f="pct" inputmode="numeric" value="${c.pct}" aria-label="Commission en pour cent"><span>%</span></label>
-        <button type="button" class="btn-ghost sm" data-rm="coif" aria-label="Retirer le coiffeur">✕</button></div></div></div>`).join("") + `<button class="btn alt" type="button" id="coif-add">Ajouter un coiffeur</button>`;
+        <button type="button" class="btn-ghost sm" data-rm="coif" aria-label="Retirer le coiffeur">✕</button></div>
+        <div class="row small"><label class="mini">Arrive à <input class="field" data-f="debut" type="time" value="${esc(c.debut || "")}" aria-label="Heure d'arrivée prévue"></label>
+          <label class="sw"><input type="checkbox" data-f="gerant"${(s.gerants || []).includes(c.id) ? " checked" : ""}> Gérant</label>
+          <label class="sw"><input type="checkbox" data-f="moi"${s.patronCoif === c.id ? " checked" : ""}> C'est moi</label></div></div></div>`).join("") + `<button class="btn alt" type="button" id="coif-add">Ajouter un coiffeur</button>
+        <p class="small muted">Gérant : il encaisse pour tout le salon et voit les clients, pas le bilan ni les réglages. « C'est moi » : le patron qui coupe aussi.</p>`;
     $("#coif-add").onclick = () => Store.updateSalon(ME.sid, { coiffeurs: coiffeurs().concat({ id: uid(), name: "Coiffeur", pct: 40 }) });
     $("#s-pt").innerHTML = pointageHtml(coiffeurs());
     if (!$("#s-code").dataset.done) {
@@ -671,6 +722,7 @@ ROUTES.salon = (part) => {
       <div class="row"><button class="btn-ghost" type="button" id="me-sw">Changer de salon</button><button class="btn-ghost" type="button" id="me-out">Se déconnecter</button></div>`;
     $("#me-sw").onclick = () => { Object.assign(ME, { role: null, sid: null }); saveMe(); go("accueil"); };
     const out = $("#me-out"); if (out) out.onclick = async () => { await Store.signOut(); Object.assign(ME, { role: null, sid: null }); saveMe(); go("accueil"); };
+    salonPlus(s);
     tabs("salon");
   };
   refresh();
@@ -686,6 +738,9 @@ function bindSalonEdits() {
       if (f === "express") return saveList("services", sv.dataset.sv, { express: e.target.checked });
       saveList("services", sv.dataset.sv, { [f]: f === "name" ? e.target.value.trim() : Math.max(0, +e.target.value.replace(/\D/g, "") || 0) });
     }
+    if (co && f === "gerant") { const g = (LIVE.salon.gerants || []).filter((x) => x !== co.dataset.co); if (e.target.checked) g.push(co.dataset.co); return Store.updateSalon(ME.sid, { gerants: g }); }
+    if (co && f === "moi") return Store.updateSalon(ME.sid, { patronCoif: e.target.checked ? co.dataset.co : "" });
+    if (co && f === "debut") return saveList("coiffeurs", co.dataset.co, { debut: e.target.value });
     if (co) saveList("coiffeurs", co.dataset.co, { [f]: f === "name" ? e.target.value.trim() : Math.min(100, +e.target.value.replace(/\D/g, "") || 0) });
   });
   root.addEventListener("click", async (e) => {
@@ -696,7 +751,12 @@ function bindSalonEdits() {
     if (b.dataset.rm === "svc") { const id = b.closest("[data-sv]").dataset.sv, old = services(); Store.updateSalon(ME.sid, { services: old.filter((x) => x.id !== id) }); toast("Coupe supprimée", () => Store.updateSalon(ME.sid, { services: old })); }
     if (b.dataset.rm === "coif") {
       if (coiffeurs().length <= 1) return toast("Il faut au moins un coiffeur.");
-      const id = b.closest("[data-co]").dataset.co, old = coiffeurs(); Store.updateSalon(ME.sid, { coiffeurs: old.filter((x) => x.id !== id) }); toast("Coiffeur retiré", () => Store.updateSalon(ME.sid, { coiffeurs: old }));
+      const id = b.closest("[data-co]").dataset.co, old = coiffeurs(), c = old.find((x) => x.id === id);
+      if (!(await sheet(`Retirer ${c.name} ? Son téléphone n'aura plus accès au salon.`, [{ label: "Retirer", value: 1 }]))) return;
+      Store.updateSalon(ME.sid, { coiffeurs: old.filter((x) => x.id !== id), gerants: (LIVE.salon.gerants || []).filter((x) => x !== id) });
+      // son téléphone perd l'accès tout de suite (idée 60)
+      const n = await Store.unlinkStaff(ME.sid, id).catch(() => 0);
+      toast(`${c.name} retiré${n ? ", son téléphone n'a plus accès" : ""}`);
     }
   });
 }
@@ -754,7 +814,7 @@ ROUTES.ticket = (sid) => {
       const svs = services();
       if (!choice.svc && svs[0]) choice.svc = svs[0].id;
       $("#t-body").innerHTML = head + (me && me.status === "fini" ? `<div class="banner ok">${t("Merci et à bientôt !")}</div>` : "") +
-        (s.blocked ? `<div class="banner">Ce salon n'est pas disponible dans l'appli pour le moment.</div>` : !s.open ? `<div class="banner">${t("Salon fermé pour le moment")}</div>` : `
+        (!unlocked(s) ? `<div class="banner">Ce salon n'est pas disponible dans l'appli pour le moment.</div>` : closedOn(s, dayOf()) ? `<div class="banner">${esc(closedLabel(s))}</div>` : !s.open ? `<div class="banner">${t("Salon fermé pour le moment")}</div>` : `
         <div class="kpis"><div><b>${w.length}</b><span>${t("en attente")}</span></div><div><b>${waitLabel(last)}</b><span>${t("Attente estimée")}</span></div></div>
         ${offersHtml(s)}
         <a class="btn alt" href="#reserver/${esc(sid)}">Prendre rendez-vous à une heure fixe</a>
@@ -763,7 +823,7 @@ ROUTES.ticket = (sid) => {
           <div class="cat" id="t-cat">${svs.map((sv) => `<button type="button" class="cat-item" data-s="${esc(sv.id)}" aria-pressed="${choice.svc === sv.id}">${svcThumb(sv, "cat-img")}<b>${esc(sv.name)}</b><span>${fcfa(sv.price)} · ${sv.dur} ${t("min")}${sv.express ? " · express" : ""}</span></button>`).join("")}</div>
           ${coiffeurs().length > 1 ? `<h2 class="sec">${t("Coiffeur")}</h2><div class="chips" id="t-coif"><button type="button" class="chip" data-c="" aria-pressed="${!choice.coif}">${t("Peu importe")}</button>${coiffeurs().map((c) => `<button type="button" class="chip" data-c="${esc(c.id)}" aria-pressed="${choice.coif === c.id}">${esc(c.name)}</button>`).join("")}</div>` : ""}
           <label class="lbl" for="t-name">${t("Ton prénom")}</label><input class="field" id="t-name" maxlength="30" required autocomplete="given-name" value="${esc(ME.name || "")}">
-          <label class="lbl" for="t-tel">${t("Ton numéro (pour être prévenu)")}</label><input class="field" id="t-tel" inputmode="tel" maxlength="20" autocomplete="tel" value="${esc(ME.tel || "")}">
+          <label class="lbl" for="t-tel">${t("Ton numéro (pour être prévenu)")}</label><input class="field" id="t-tel" inputmode="tel" maxlength="20" autocomplete="tel" required pattern="[0-9 +.]{9,20}" value="${esc(ME.tel || "")}">
           <button class="btn big">${t("Prendre mon ticket")}</button><p class="small" id="t-msg"></p></form>`) + historyHtml(sid) + `<div class="row"><a class="btn-ghost" href="#page/${esc(sid)}">Page du salon</a><a class="btn-ghost" href="#galerie/${esc(sid)}">${t("Nos réalisations")}</a></div>` + foot;
       const f = $("#t-form");
       if (f) {
@@ -779,7 +839,7 @@ ROUTES.ticket = (sid) => {
             const u = await Store.ensureUser();
             const day = dayOf(), num = await Store.nextNumber(sid, day);
             const id = await Store.add(sid, "queue", { day, num, name, serviceId: choice.svc, coiffeurId: choice.coif || null, status: "attente", at: Date.now(), uid: u, express: !!svcOf(choice.svc).express }, true);
-            if (tel) Store.set(sid, "contacts", id, { day, phone: tel }).catch(() => {});
+            if (tel) { Store.set(sid, "contacts", id, { day, phone: tel }).catch(() => {}); Store.inscrire(tel, name, "client", sid); }
             ME.tickets[sid] = { id, day }; saveMe(); notified = false; lastStatus = null; refresh();
           } catch (er) { $("#t-msg").className = "small msg-ko"; $("#t-msg").textContent = "Ticket impossible pour le moment. Vérifie le réseau."; }
         };
@@ -830,7 +890,7 @@ ROUTES.ecran = (sid) => {
     $("#e-body").innerHTML = `<header><b>${esc(s.name)}</b><span class="clock">${hm(Date.now())}</span><div class="lang" role="group" aria-label="Langue"><button type="button" data-l="fr" aria-pressed="${ME.lang === "fr"}">FR</button><button type="button" data-l="wo" aria-pressed="${ME.lang === "wo"}">WO</button></div></header>
       <div class="sc-grid"><div>
         ${called.length ? `<div class="sc-call">${called.map((e) => `<span><b>${e.num}</b> ${esc(e.name)}</span>`).join("")}<em>${t("C'est ton tour !")}</em></div>` : ""}
-        <h2>${t("Au fauteuil")}</h2><div class="sc-row">${ch.length ? ch.map((e) => `<div class="sc-tile"><b>${e.num}</b><span>${esc(e.name)}</span><small>${esc((coifOf(e.coiffeurId) || {}).name || "")}</small></div>`).join("") : `<p class="muted">—</p>`}</div>
+        ${pausedNames()}<h2>${t("Au fauteuil")}</h2><div class="sc-row">${ch.length ? ch.map((e) => `<div class="sc-tile"><b>${e.num}</b><span>${esc(e.name)}</span><small>${esc((coifOf(e.coiffeurId) || {}).name || "")}</small></div>`).join("") : `<p class="muted">—</p>`}</div>
         <h2>${t("Suivants")}</h2><ol class="sc-next">${w.filter((e) => e.status === "attente").slice(0, 8).map((e) => `<li><b>${e.num}</b><span>${esc(e.name)}</span><small>${waitLabel(est[e.id])}</small></li>`).join("") || `<li class="muted">${s.open ? "Personne n'attend" : t("Salon fermé pour le moment")}</li>`}</ol></div>
         <aside>${qrSvg(ticketUrl(sid), 220)}<p>${t("Scanne pour prendre ta place")}</p><b class="code">${esc(sid)}</b></aside></div>`;
     $$("[data-l]").forEach((b) => (b.onclick = () => { ME.lang = b.dataset.l; saveMe(); refresh(); }));
@@ -897,4 +957,5 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.ser
   net();
   try { await Store.init(); } catch (e) { toast("Connexion au serveur impossible : mode hors connexion."); }
   render();
+  noteDevice();
 })();

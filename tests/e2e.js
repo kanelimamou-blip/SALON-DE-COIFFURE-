@@ -10,7 +10,7 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   const ADMIN = { uid: su.localId, email: su.email };
   fs.writeFileSync(__dirname + '/regles-test.rules', fs.readFileSync(__dirname + '/../firestore.rules', 'utf8').replace(/function admin\(\) \{[^}]*\}/, `function admin() { return signed() && request.auth.uid in ['${ADMIN.uid}']; }`));
   await new Promise((ok) => setTimeout(ok, 5000));   // l'émulateur recharge les règles
-  const b = await chromium.launch();
+  const b = await chromium.launch(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {});
   const errs = [];
   const phone = async (name) => {
     const ctx = await b.newContext({ viewport: { width: 390, height: 844 } });
@@ -176,6 +176,112 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   const cl3 = await phone('client-3'); await cl3.goto(U); await W(cl3, 2500);
   await cl3.fill('#cli-code', sid.toLowerCase()); await cl3.click('#cli .btn'); await W(cl3, 3000);
   check(cl3.url().includes('#ticket/' + sid), 'client : le code du salon ouvre la page du ticket');
+  // 15. Base des numéros, invitations suivies, paiement noté à la main, messages, suspension programmée
+  await adm.goto(U + '#admin'); await W(adm, 3500);
+  await adm.click('[data-tab="base"]'); await W(adm, 800);
+  const bt = await txt(adm, '#ad-base');
+  check(bt.includes('Fallou') && bt.includes('770000001') && bt.includes('771112233'), 'admin : numéros du client et du patron dans la base');
+  const peekBase = await cli.evaluate(async () => { try { await firebase.firestore().collection('base').get(); return 'accepté'; } catch (e) { return e.code; } });
+  check(peekBase === 'permission-denied', 'règles : un client ne lit pas la base des numéros (' + peekBase + ')');
+  await adm.click('[data-tab="invit"]'); await W(adm, 800);
+  check((await txt(adm, '#ad-t-invit')).includes('Salon créé'), 'admin : invitation suivie jusqu\'au salon créé');
+  await adm.click('[data-tab="comptes"]'); await W(adm, 500);
+  await adm.click(`[data-sid="${sid}"] [data-ad="detail"]`); await W(adm, 3000);
+  check((await txt(adm, `[data-sid="${sid}"] .ad-detail`)).includes('Fonctions utilisées'), 'admin : détail du salon (courbe et fonctions)');
+  check((await txt(adm, `[data-sid="${sid}"]`)).includes('Essai jusqu'), 'admin : fin de l\'essai affichée');
+  await adm.click(`[data-sid="${sid}"] [data-ad="pay"]`); await W(adm, 2500);
+  check((await txt(adm, '#ad-kpi')).includes('2 000 F'), 'admin : paiement de 2 000 F noté, total du mois');
+  await adm.fill(`[data-sid="${sid}"] [data-pf="msg"]`, 'Bonjour patron, tout va bien ?'); await adm.click(`[data-sid="${sid}"] [data-ad="send"]`); await W(adm, 2500);
+  await pat.goto(U + '#salon'); await W(pat, 3000);
+  check((await txt(pat, '#s-msg')).includes('message'), 'patron : message de l\'équipe signalé');
+  await pat.goto(U + '#aide'); await W(pat, 2000);
+  check((await txt(pat, '#ai-list')).includes('tout va bien'), 'patron : lit le message de l\'équipe');
+  await pat.fill('#ai-t', 'La caisse ne marche pas'); await pat.click('#ai-f .btn'); await W(pat, 2500);
+  await adm.click('[data-tab="messages"]'); await W(adm, 1500);
+  check((await txt(adm, '#ad-t-messages')).includes('La caisse ne marche pas'), 'admin : reçoit « J\'ai un problème » du patron');
+  await adm.click('[data-tab="journal"]'); await W(adm, 800);
+  check((await txt(adm, '#ad-t-journal')).includes('Paiement de 2 000 F'), 'admin : journal des actions');
+  await adm.click('[data-tab="tel"]'); await W(adm, 800);
+  check((await txt(adm, '#ad-t-tel')).includes('version'), 'admin : téléphones avec version et temps de chargement');
+  // suspension programmée hier sur le salon invité : plus de ticket possible
+  const sid2 = (await np.evaluate(() => JSON.parse(localStorage.getItem('salon-me')))).sid;
+  await adm.click('[data-tab="comptes"]'); await W(adm, 500);
+  await adm.click(`[data-sid="${sid2}"] [data-ad="detail"]`); await W(adm, 1500);
+  await adm.fill(`[data-sid="${sid2}"] [data-pf="blockAt"]`, await adm.evaluate(() => dayOf(Date.now() - 864e5))); await adm.click(`[data-sid="${sid2}"] [data-ad="blockAt"]`); await W(adm, 2500);
+  const forced2 = await cli2.evaluate(async (sid) => { try { const u = (await firebase.auth().signInAnonymously()).user; await firebase.firestore().collection('salons').doc(sid).collection('queue').add({ day: '2030-01-01', num: 1, name: 'X', status: 'attente', uid: u.uid }); return 'accepté'; } catch (e) { return e.code; } }, sid2);
+  check(forced2 === 'permission-denied', 'règles : suspension programmée appliquée (' + forced2 + ')');
+  // transfert du salon invité à un nouveau patron
+  await adm.click(`[data-sid="${sid2}"] [data-ad="transfer"]`); await W(adm, 2500);
+  const tlink = decodeURIComponent((await adm.evaluate((s) => document.querySelector(`[data-sid="${s}"] .ad-out a[href*="wa.me"]`).href, sid2)).split('text=')[1]).match(/http\S+/)[0];
+  const rp = await phone('repreneur'); await rp.goto(tlink); await W(rp, 2500);
+  await rp.fill('#em-mail', `rp${Date.now()}@test.sn`); await rp.fill('#em-pass', 'repris123'); await rp.click('#em [data-a="new"]'); await W(rp, 4000);
+  const own = await rp.evaluate(async (sid) => (await firebase.firestore().collection('salons').doc(sid).get()).data().owner === firebase.auth().currentUser.uid, sid2);
+  check(own && rp.url().includes('#salon'), 'transfert : le nouveau patron reprend le salon');
+  const again = await np.evaluate(async (sid) => { try { await firebase.firestore().collection('salons').doc(sid).update({ name: 'Volé' }); return 'accepté'; } catch (e) { return e.code; } }, sid2);
+  check(again === 'permission-denied', 'transfert : l\'ancien patron n\'a plus la main (' + again + ')');
+  // associé en lecture seule
+  const as = await phone('associe'); await as.goto(U + '#demarrer'); await W(as, 2500);
+  await as.fill('#em-mail', `as${Date.now()}@test.sn`); await as.fill('#em-pass', 'associe1'); await as.click('#em [data-a="new"]'); await W(as, 3000);
+  const asUid = await as.evaluate(() => firebase.auth().currentUser.uid);
+  await adm.click('[data-tog="ad-p-as"]'); await W(adm, 500); await adm.fill('#as-uid', asUid); await adm.click('#as-add'); await W(adm, 2500);
+  await as.goto(U + '#admin'); await W(as, 4000);
+  check((await txt(as, '#ad-list')).includes('Salon Essai') && !(await as.isVisible('[data-ad="block"]')), 'associé : voit les salons, sans bouton Suspendre');
+  const asBlock = await as.evaluate(async (sid) => { try { await firebase.firestore().collection('salons').doc(sid).update({ blocked: true }); return 'accepté'; } catch (e) { return e.code; } }, sid);
+  check(asBlock === 'permission-denied', 'règles : l\'associé ne suspend pas (' + asBlock + ')');
+
+  // 16. Patron : crédit, liste noire, pause, fermeture, gérant, objectif, verrou, retrait d'un coiffeur
+  await cli.goto(U + '#ticket/' + sid); await W(cli, 2500);
+  await cli.fill('#t-name', 'Fallou'); await cli.fill('#t-tel', '770000001'); await cli.click('#t-form .btn.big'); await W(cli, 3000);
+  await pat.goto(U + '#file'); await W(pat, 3000);
+  await pat.click('#f-wait [data-a="chair"]'); await W(pat, 800);
+  if (await pat.isVisible('.sheet')) { await pat.click('.sheet [data-i="0"]'); await W(pat, 1500); }
+  await pat.click('#f-chair [data-a="fini"]'); await W(pat, 800);
+  await pat.click('.sheet button:has-text("crédit")'); await W(pat, 2500);
+  await pat.goto(U + '#clients'); await W(pat, 3000);
+  check((await txt(pat, '#cl-credit')).includes('Crédits en cours') && (await txt(pat, '#cl-credit')).includes('Fallou'), 'patron : coupe à crédit suivie dans Clients');
+  await pat.click('#cl-credit [data-crp]'); await W(pat, 800); await pat.click('.sheet [data-i="0"]'); await W(pat, 2500);
+  check(!(await txt(pat, '#cl-credit')).includes('Fallou'), 'patron : crédit payé, sorti de la liste');
+  await pat.click('#cl-list [data-noir]'); await W(pat, 800); await pat.click('.sheet [data-i="1"]'); await W(pat, 2000);
+  check((await txt(pat, '#cl-list')).includes('Liste noire'), 'patron : client sur la liste noire');
+  await cli.goto(U + '#ticket/' + sid); await W(cli, 2500);
+  await cli.fill('#t-name', 'Fallou'); await cli.fill('#t-tel', '770000001'); await cli.click('#t-form .btn.big'); await W(cli, 3000);
+  await pat.goto(U + '#file'); await W(pat, 3000);
+  check((await txt(pat, '#f-wait')).includes('Ne paie pas'), 'file : client de la liste noire signalé');
+  await pat.goto(U + '#salon'); await W(pat, 2500); await pat.click('text=Coiffeurs et pointage'); await W(pat, 500);
+  await pat.click('#s-pt [data-in]'); await W(pat, 1500);
+  await pat.goto(U + '#file'); await W(pat, 2500);
+  await pat.click('[data-pause]'); await W(pat, 2000);
+  check((await txt(pat, '.pause-bar')).includes('en pause'), 'patron : pause de 15 min notée');
+  await pat.click('[data-pause]'); await W(pat, 1500);
+  // gérant : Ibou (le coiffeur relié) devient gérant
+  await pat.goto(U + '#salon'); await W(pat, 2500); await pat.click('text=Coiffeurs et pointage'); await W(pat, 500);
+  await pat.check('#s-coif [data-co]:nth-child(2) [data-f="gerant"]'); await W(pat, 3000);
+  await coi.goto(U + '#file'); await W(coi, 4000);
+  check((await txt(coi, '#tabs')).includes('Clients'), 'gérant : onglet Clients');
+  await coi.goto(U + '#caisse'); await W(coi, 3000);
+  check((await txt(coi, 'main')).includes('Caisse du jour'), 'gérant : caisse de tout le salon');
+  // fermeture exceptionnelle aujourd'hui
+  await pat.click('text=Fermetures et Ramadan'); await W(pat, 500);
+  await pat.click('#fx-m [data-v="Magal"]'); await pat.fill('#fx-du', await pat.evaluate(() => dayOf())); await pat.click('#fx-f .btn'); await W(pat, 2500);
+  await cli2.goto(U + '#ticket/' + sid); await W(cli2, 3000);
+  check((await txt(cli2, '#t-body')).includes('Salon fermé (Magal)'), 'client : fermeture exceptionnelle affichée');
+  await pat.click('#fx-x'); await W(pat, 1500);
+  // objectif et comparaison dans le bilan
+  await pat.goto(U + '#bilan'); await W(pat, 3000);
+  await pat.fill('#bp-goal-i', '100000'); await pat.click('#bp-goal-b'); await W(pat, 2500);
+  check((await txt(pat, '#b-plus')).includes('Objectif du mois') && (await txt(pat, '#bp-cmp')).includes('Évolution'), 'bilan : objectif et comparaison');
+  // verrou de la caisse
+  await pat.goto(U + '#salon'); await W(pat, 2500); await pat.click('text=Ce téléphone'); await pat.fill('#ph-pin', '1234'); await pat.click('#ph-pin-b'); await W(pat, 500);
+  await pat.evaluate(() => { ME.pinOk = 0; saveMe(); }); await pat.goto(U + '#bilan'); await W(pat, 1500);
+  check((await txt(pat, 'main')).includes('Caisse verrouillée'), 'verrou : bilan caché sans le code');
+  await pat.fill('#pin-v', '1234'); await pat.click('#pin-f .btn'); await W(pat, 2000);
+  check((await txt(pat, 'main')).includes('Bilan de'), 'verrou : le code ouvre le bilan');
+  // retrait d'un coiffeur : son téléphone perd l'accès
+  await pat.goto(U + '#salon'); await W(pat, 2500); await pat.click('text=Coiffeurs et pointage'); await W(pat, 500);
+  await pat.click('#s-coif [data-co]:nth-child(2) [data-rm="coif"]'); await W(pat, 800); await pat.click('.sheet [data-i="0"]'); await W(pat, 3000);
+  const gone = await coi.evaluate(async (sid) => { try { await firebase.firestore().collection('salons').doc(sid).collection('clients').get(); return 'accepté'; } catch (e) { return e.code; } }, sid);
+  check(gone === 'permission-denied', 'coiffeur retiré : son téléphone n\'a plus accès (' + gone + ')');
+
   const notAdmin = await phone('pas-admin'); await notAdmin.goto(U + '#admin'); await W(notAdmin, 2500);
   check((await txt(notAdmin, 'main')).includes('Connecte-toi'), 'espace admin fermé sans compte');
 

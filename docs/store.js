@@ -8,7 +8,12 @@
 // salons/{sid}/contacts/{id}        numéro du client d'un ticket (patron et coiffeurs seulement)
 // salons/{sid}/ventes|depenses|stock|pointage|galerie/{id}
 // salons/{sid}/meta/counter         dernier numéro de ticket du jour
+// salons/{sid}/credits|messages/{id} coupes à crédit ; messages entre le patron et l'équipe de l'appli
 // erreurs/{id}                     erreurs remontées par les téléphones (lues par l'admin seulement)
+// base/{numéro}                    patrons et clients inscrits avec leur numéro (lus par l'admin seulement)
+// invitations|paiements|journal/{id}  espace admin : invitations envoyées, abonnements notés à la main, actions faites
+// appareils/{uid}                  version de l'appli et temps de chargement de chaque téléphone
+// admin/config                     associés (admins en lecture seule)
 // espace admin : lecture de tous les salons, blocked modifiable par les admins seulement
 
 const Store = (() => {
@@ -89,6 +94,7 @@ const Store = (() => {
     return ref.id;
   }
   const set = (sid, col, id, obj, confirm) => settle(S(sid).collection(col).doc(id).set(obj), confirm);
+  const merge = (sid, col, id, obj) => settle(S(sid).collection(col).doc(id).set(obj, { merge: true }));
   const update = (sid, col, id, patch, confirm) => settle(S(sid).collection(col).doc(id).update(patch), confirm);
   const remove = (sid, col, id) => settle(S(sid).collection(col).doc(id).delete());
   async function getDoc(sid, col, id) { const d = await S(sid).collection(col).doc(id).get(); return d.exists ? { id, ...d.data() } : null; }
@@ -111,11 +117,63 @@ const Store = (() => {
     await S(sid).collection("staff").doc(uid).set({ coiffeurId, code: codeIn });
   }
 
+  // Collections hors salon (base des numéros, espace admin)
+  const T = (col) => db.collection(col);
+  const rows = (q) => q.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const addTop = (col, obj) => settle(T(col).add(obj));
+  async function addTopRef(col, obj) { const ref = T(col).doc(); await settle(ref.set(obj), true); return ref.id; }
+  const setTop = (col, id, obj, merge) => settle(T(col).doc(id).set(obj, { merge: !!merge }));
+  const updateTop = (col, id, patch) => settle(T(col).doc(id).update(patch));
+  const removeTop = (col, id) => settle(T(col).doc(id).delete());
+  async function getTop(col, id) { const d = await T(col).doc(id).get(); return d.exists ? { id, ...d.data() } : null; }
+  function watchTop(col, cb, opt = {}) {
+    let q = T(col);
+    (opt.where || []).forEach(([f, op, v]) => { q = q.where(f, op, v); });
+    if (opt.order) q = q.orderBy(opt.order, "desc");
+    if (opt.limit) q = q.limit(opt.limit);
+    return q.onSnapshot((snap) => cb(rows(snap)), opt.err || (() => cb([])));
+  }
+  // lecture unique d'une sous-collection d'un salon (comparaisons de mois, courbes)
+  async function list(sid, col, where) {
+    let q = S(sid).collection(col);
+    (where || []).forEach(([f, op, v]) => { q = q.where(f, op, v); });
+    return rows(await q.get());
+  }
+  // Inscription par numéro (base de numéros de l'appli) : patron à la création du salon, client à son ticket ou rendez-vous
+  function inscrire(tel, nom, role, sid) {
+    const key = String(tel || "").replace(/\D/g, "").replace(/^221/, "").slice(-9);
+    if (key.length < 7 || !user) return Promise.resolve();
+    return T("base").doc(key).set({ tel: key, nom: String(nom || "").slice(0, 40), [role]: true, sids: FV.arrayUnion(sid || ""), last: Date.now(), n: FV.increment(1) }, { merge: true }).catch(() => {});
+  }
+  // Coiffeurs reliés : le patron retire le téléphone d'un coiffeur qui part
+  async function unlinkStaff(sid, coiffeurId) {
+    let q = S(sid).collection("staff"); if (coiffeurId) q = q.where("coiffeurId", "==", coiffeurId);
+    const docs = (await q.get()).docs; await Promise.all(docs.map((d) => d.ref.delete())); return docs.length;
+  }
+  // Reprise d'un salon par un nouveau patron, avec le code de transfert créé par l'admin
+  async function claimSalon(sid, codeIn) {
+    await S(sid).update({ owner: user.uid, claim: codeIn });
+    await S(sid).collection("private").doc("transfer").delete().catch(() => {});
+  }
+
   // Espace admin : tous les salons, et l'activité récente d'un salon (tickets et rendez-vous, données publiques)
   const watchAllSalons = (cb, err) => db.collection("salons").orderBy("created", "desc").onSnapshot((q) => cb(q.docs.map(fromDoc)), err || (() => cb([])));
   async function activity(sid, since) {
-    const [q, r] = await Promise.all([S(sid).collection("queue").where("day", ">=", since).get(), S(sid).collection("rdv").where("day", ">=", since).get()]);
-    return { tickets: q.size, rdv: r.size, last: q.docs.map((d) => d.data().day).sort().pop() || "" };
+    const hier = new Date(Date.now() - 864e5), y = `${hier.getFullYear()}-${String(hier.getMonth() + 1).padStart(2, "0")}-${String(hier.getDate()).padStart(2, "0")}`;
+    const [q, r, v] = await Promise.all([S(sid).collection("queue").where("day", ">=", since).get(), S(sid).collection("rdv").where("day", ">=", since).get(),
+      S(sid).collection("ventes").where("day", ">=", since).get().catch(() => null)]);
+    const qd = q.docs.map((d) => d.data().day), vd = v ? v.docs.map((d) => d.data().day) : [];
+    return { tickets: q.size, rdv: r.size, ventes: v ? v.size : null, hierT: qd.filter((d) => d === y).length, hierV: vd.filter((d) => d === y).length, last: qd.sort().pop() || "" };
+  }
+  // Courbe sur 30 jours et fonctions vraiment utilisées par un salon
+  async function usage(sid, since) {
+    const one = (col) => S(sid).collection(col).limit(1).get().then((x) => x.size > 0, () => false);
+    const [q, v, r, f] = await Promise.all([S(sid).collection("queue").where("day", ">=", since).get(), S(sid).collection("ventes").where("day", ">=", since).get().catch(() => ({ docs: [] })),
+      S(sid).collection("rdv").where("day", ">=", since).get(), Promise.all(["clients", "depenses", "stock", "galerie", "credits"].map(one))]);
+    const days = {}; const add = (d, k) => { days[d] = days[d] || { t: 0, v: 0, r: 0 }; days[d][k]++; };
+    q.docs.forEach((d) => add(d.data().day, "t")); v.docs.forEach((d) => add(d.data().day, "v")); r.docs.forEach((d) => add(d.data().day, "r"));
+    const [clients, depenses, stock, galerie, credits] = f;
+    return { days, used: { file: q.size > 0, caisse: v.docs.length > 0, rdv: r.size > 0, clients, depenses, stock, galerie, credits } };
   }
   // Erreurs vues sur les téléphones, pour que l'admin repère un problème avant qu'on le lui signale
   let sent = 0;
@@ -134,7 +192,8 @@ const Store = (() => {
     get uid() { return user ? user.uid : null; },
     get email() { return user ? user.email || "" : ""; },
     createSalon, watchSalon, getSalon, updateSalon, mySalons, watchDirectory,
-    watch, add, set, update, remove, getDoc, nextNumber,
-    staffCode, newStaffCode, joinStaff, watchAllSalons, activity, logError, watchErrors, removeError,
+    watch, add, set, merge, update, remove, getDoc, nextNumber,
+    staffCode, newStaffCode, joinStaff, watchAllSalons, activity, usage, logError, watchErrors, removeError,
+    addTop, addTopRef, setTop, updateTop, removeTop, getTop, watchTop, list, inscrire, unlinkStaff, claimSalon,
   };
 })();

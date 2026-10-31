@@ -8,11 +8,17 @@ const fromMin = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const dayLabel = (d) => { const t0 = dayOf(), t1 = dayOf(Date.now() + 864e5); if (d === t0) return "Aujourd'hui"; if (d === t1) return "Demain"; return new Date(d + "T12:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }); };
 const nextDays = (n) => Array.from({ length: n }, (_, i) => dayOf(Date.now() + i * 864e5));
 const phoneKey = (p) => String(p || "").replace(/\D/g, "").replace(/^221/, "").slice(-9);
+// Fermeture exceptionnelle (idée 85) et horaires du Ramadan (idée 86)
+const closedOn = (s, day) => !!(s.fermetureExc && s.fermetureExc.du && day >= s.fermetureExc.du && day <= (s.fermetureExc.au || s.fermetureExc.du));
+const closedLabel = (s) => { const f = s.fermetureExc || {}, d = (x) => new Date(x + "T12:00").toLocaleDateString("fr-FR", { day: "numeric", month: "long" }); return `Salon fermé${f.motif ? " (" + f.motif + ")" : ""} ${f.au && f.au !== f.du ? `du ${d(f.du)} au ${d(f.au)}` : `le ${d(f.du)}`}`; };
+const inRamadan = (s, day) => !!(s.ramadan && s.ramadan.du && day >= s.ramadan.du && day <= (s.ramadan.au || s.ramadan.du));
+const hoursOn = (s, day) => inRamadan(s, day) ? [s.ramadan.ouverture || "10:00", s.ramadan.fermeture || "18:00"] : [s.ouverture || "09:00", s.fermeture || "21:00"];
 const activeOffers = (s) => (s.offres || []).filter((o) => !o.until || o.until >= dayOf());
 
 // Créneaux libres d'un jour : un rendez-vous par coiffeur et par créneau
 function freeSlots(s, rdvs, day, coiffeurId) {
-  const open = toMin(s.ouverture || "09:00"), close = toMin(s.fermeture || "21:00");
+  if (closedOn(s, day)) return [];
+  const h = hoursOn(s, day), open = toMin(h[0]), close = toMin(h[1]);
   const now = day === dayOf() ? new Date().getHours() * 60 + new Date().getMinutes() + 15 : 0;
   const n = Math.max(1, (s.coiffeurs || []).length);
   const taken = rdvs.filter((r) => r.day === day && r.status === "confirme");
@@ -69,7 +75,7 @@ ROUTES.rdv = () => {
     e.preventDefault();
     if (!$("#r-time").value) return toast("Plus de place ce jour-là.");
     const id = await Store.add(ME.sid, "rdv", { day: $("#r-day").value, time: $("#r-time").value, name: $("#r-name").value.trim(), serviceId: $("#r-svc").value, coiffeurId: $("#r-coif").value || null, type: "normal", status: "confirme", at: Date.now(), uid: Store.uid });
-    const tel = $("#r-tel").value.trim(); if (tel) Store.set(ME.sid, "contacts", id, { day: $("#r-day").value, phone: tel }).catch(() => {});
+    const tel = $("#r-tel").value.trim(); if (tel) { Store.set(ME.sid, "contacts", id, { day: $("#r-day").value, phone: tel }).catch(() => {}); Store.inscrire(tel, $("#r-name").value.trim(), "client", ME.sid); }
     $("#r-name").value = ""; $("#r-tel").value = ""; $("#r-add-box").open = false; toast("Rendez-vous enregistré");
   };
   refreshFn = () => {
@@ -128,7 +134,7 @@ ROUTES.reserver = (sid) => {
     const occ = ch.type === "occasion", dom = ch.type === "domicile";
     // garder ce qui est déjà tapé quand la page se redessine
     const typed = Object.fromEntries($$("#rv-f input, #rv-f select").map((i) => [i.id, i.value]));
-    $("#rv").innerHTML = `<div class="t-head"><div><h1>Rendez-vous</h1><p class="muted small">${esc(s.name)}${s.ouverture ? ` · ${esc(s.ouverture)} à ${esc(s.fermeture || "")}` : ""}</p></div><a class="btn-ghost sm" href="#ticket/${esc(sid)}">File d'attente</a></div>
+    $("#rv").innerHTML = `<div class="t-head"><div><h1>Rendez-vous</h1><p class="muted small">${esc(s.name)} · ${esc(hoursOn(s, ch.day)[0])} à ${esc(hoursOn(s, ch.day)[1])}${inRamadan(s, ch.day) ? " (Ramadan)" : ""}${closedOn(s, ch.day) ? " · " + esc(closedLabel(s)) : ""}</p></div><a class="btn-ghost sm" href="#ticket/${esc(sid)}">File d'attente</a></div>
       ${mine.length ? `<section><h2 class="sec">Mes rendez-vous</h2><div class="list">${mine.map((r) => `<div class="q-item st-attente" data-m="${esc(r.id)}"><span class="num sm-num">${esc(r.time)}</span><div class="q-main"><b>${dayLabel(r.day)}</b><span class="small muted">${esc(svcOf(r.serviceId).name)}${coifOf(r.coiffeurId) ? " · " + esc(coifOf(r.coiffeurId).name) : ""}</span></div>
         <div class="q-act"><button class="btn sm alt" data-mv="report" type="button">Reporter</button><button class="btn-ghost sm" data-mv="annule" type="button">Annuler</button></div></div>`).join("")}</div></section>` : ""}
       <form id="rv-f" class="card" data-keep>
@@ -168,7 +174,7 @@ ROUTES.reserver = (sid) => {
         if (occ) { o.occasion = $("#rv-occ").value; o.acompte = { amount: s.acompte || 2000, ref: $("#rv-ref").value.trim(), ok: false }; }
         if (dom) o.address = $("#rv-addr").value.trim();
         const id = await Store.add(sid, "rdv", o, true);
-        Store.set(sid, "contacts", id, { day: ch.day, phone: tel }).catch(() => {});
+        Store.set(sid, "contacts", id, { day: ch.day, phone: tel }).catch(() => {}); Store.inscrire(tel, name, "client", sid);
         ME.rdv[sid].push(id); saveMe(); ch.time = ""; toast(`Rendez-vous réservé : ${dayLabel(o.day).toLowerCase()} à ${o.time}`); refresh();
       } catch (er) { $("#rv-msg").className = "small msg-ko"; $("#rv-msg").textContent = "Réservation impossible. Vérifie le réseau."; }
     };
@@ -187,9 +193,10 @@ ROUTES.reserver = (sid) => {
 ROUTES.clients = () => {
   let rows = [], q = "", late = false;
   viewSubs.push(Store.watch(ME.sid, "clients", [], (r) => { rows = r; refresh(); }));
-  $view.innerHTML = `<h1>Mes clients</h1>
+  $view.innerHTML = `<h1>Mes clients</h1><div id="cl-credit"></div>
     <div class="row" data-keep><input class="field" id="cl-q" placeholder="Chercher un prénom ou un numéro" autocomplete="off"></div>
     <div class="chips"><button type="button" class="chip" id="cl-all" aria-pressed="true">Tous</button><button type="button" class="chip" id="cl-late" aria-pressed="false">À relancer (3 semaines et plus)</button></div>
+    <details class="card" id="cl-grp"><summary><h2>Message à tous ces clients</h2></summary><div id="cl-grp-b"></div></details>
     <div id="cl-list" class="list"></div>
     <p class="small muted">Une fiche se crée à chaque coupe d'un client qui a donné son numéro (ticket ou rendez-vous).</p>`;
   $("#cl-q").oninput = (e) => { q = e.target.value.trim().toLowerCase(); paint(); };
@@ -201,9 +208,20 @@ ROUTES.clients = () => {
     $("#cl-list").innerHTML = list.length ? list.map((c) => {
       const weeks = Math.floor((Date.now() - new Date((c.last || dayOf()) + "T12:00")) / (7 * 864e5));
       return `<div class="v-item">${c.photo ? `<img class="cl-ph" src="${c.photo}" alt="">` : ""}<div class="q-main"><b>${esc(c.name)}</b><span class="small muted">${c.visits} visite${c.visits > 1 ? "s" : ""} · dernière ${c.last ? dayLabel(c.last).toLowerCase() : "?"}${usual(c) ? " · " + esc(usual(c)) : ""}</span></div>
-        <a class="btn-ghost sm" target="_blank" rel="noopener" href="${waLink(c.phone, `Bonjour ${c.name}, ça fait ${weeks >= 3 ? weeks + " semaines" : "un moment"} ! Il est temps de repasser chez ${s.name || "nous"}${usual(c) ? " pour ton " + usual(c).toLowerCase() : ""}. Prends ton ticket ici : ${ticketUrl(ME.sid)}`)}">${weeks >= 3 ? "Relancer" : "WhatsApp"}</a></div>`;
+        <a class="btn-ghost sm" target="_blank" rel="noopener" href="${waLink(c.phone, `Bonjour ${c.name}, ça fait ${weeks >= 3 ? weeks + " semaines" : "un moment"} ! Il est temps de repasser chez ${s.name || "nous"}${usual(c) ? " pour ton " + usual(c).toLowerCase() : ""}. Prends ton ticket ici : ${ticketUrl(ME.sid)}`)}">${weeks >= 3 ? "Relancer" : "WhatsApp"}</a>
+        <button type="button" class="btn-ghost sm" data-noir="${esc(c.id)}" aria-label="Liste noire">${c.noir ? "⚠ Retirer" : "⚠"}</button></div>${c.noir ? `<p class="small warn noir-why">Liste noire : ${esc(c.noirWhy || "")}</p>` : ""}`;
     }).join("") : `<p class="empty">${late ? "Aucun client à relancer." : "Aucune fiche client pour le moment."}</p>`;
+    groupSend(list.filter((c) => !c.noir), s);
   };
+  // liste noire (idée 79) : client qui ne vient pas à ses rendez-vous ou ne paie pas, signalé dans la file
+  $("#cl-list").onclick = async (e) => {
+    const b = e.target.closest("[data-noir]"); if (!b) return;
+    const c = rows.find((x) => x.id === b.dataset.noir); if (!c) return;
+    if (c.noir) return Store.update(ME.sid, "clients", c.id, { noir: false, noirWhy: "" });
+    const why = await sheet(`Mettre ${c.name} sur la liste noire ?`, ["Ne vient pas à ses rendez-vous", "Ne paie pas", "Comportement"].map((x) => ({ label: x, value: x })));
+    if (why) { Store.update(ME.sid, "clients", c.id, { noir: true, noirWhy: why }); toast(`${c.name} sur la liste noire`); }
+  };
+  creditsBox();
   refreshFn = paint;
   refresh();
 };
@@ -249,6 +267,8 @@ ROUTES.page = (sid) => {
     const w = waiting().length;
     $view.innerHTML = `<div class="t-head"><div><h1>${esc(s.name)}</h1><p class="muted small">${esc(s.quartier || "")}</p></div><span class="open-tog ${s.open ? "on" : ""}">${s.open ? "Ouvert" : "Fermé"}</span></div>
       ${s.horaires || s.ouverture ? `<p>${esc(s.horaires || `Tous les jours de ${s.ouverture} à ${s.fermeture}`)}</p>` : ""}
+      ${s.fermetureExc && s.fermetureExc.du && (s.fermetureExc.au || s.fermetureExc.du) >= dayOf() ? `<div class="banner">${esc(closedLabel(s))}</div>` : ""}
+      ${s.ramadan && s.ramadan.du && (s.ramadan.au || s.ramadan.du) >= dayOf() ? `<p class="small"><b>Ramadan</b> : de ${esc(hoursOn(s, s.ramadan.du)[0])} à ${esc(hoursOn(s, s.ramadan.du)[1])}${inRamadan(s, dayOf()) ? " (en ce moment)" : ""}</p>` : ""}
       ${offersHtml(s)}
       ${s.open ? `<div class="kpis"><div><b>${w}</b><span>en attente maintenant</span></div><div><b>${waitLabel(estimate()._next)}</b><span>d'attente estimée</span></div></div>` : ""}
       <div class="row"><a class="btn" href="#ticket/${esc(sid)}">Prendre un ticket</a><a class="btn alt" href="#reserver/${esc(sid)}">Prendre rendez-vous</a></div>
