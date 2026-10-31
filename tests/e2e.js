@@ -187,7 +187,8 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   check(cl3.url().includes('#ticket/' + sid), 'client : le code du salon ouvre la page du ticket');
   // 15. Base des numéros, invitations suivies, paiement noté à la main, messages, suspension programmée
   await adm.goto(U + '#admin'); await W(adm, 3500);
-  await adm.click('[data-tab="base"]'); await W(adm, 800);
+  await adm.click('[data-kpi="base"]'); await W(adm, 800);
+  check(!(await adm.isHidden('#ad-t-base')), 'admin : la case « numéros » ouvre l\'onglet Numéros');
   const bt = await txt(adm, '#ad-base');
   check(bt.includes('Fallou') && bt.includes('770000001') && bt.includes(PAT), 'admin : numéros du client et du patron dans la base');
   const peekBase = await cli.evaluate(async () => { try { await firebase.firestore().collection('base').get(); return 'accepté'; } catch (e) { return e.code; } });
