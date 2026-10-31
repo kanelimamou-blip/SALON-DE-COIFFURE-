@@ -39,7 +39,7 @@ ROUTES.admin = async () => {
   }
   const boss = isAdmin();   // l'associé voit tout mais ne fait aucune action, sauf répondre aux patrons
   let rows = [], act = {}, errs = [], q = "", filter = "tous", sort = "recent", tab = ME.adTab || "comptes";
-  let invs = [], pays = [], logs = [], base = [], devs = [], msgs = {}, open = new Set(), usage = {}, bq = "", bf = "tous";
+  let invs = [], pays = [], logs = [], base = [], devs = [], msgs = {}, open = new Set(), usage = {}, outs = {}, bq = "", bf = "tous";
   const since = dayOf(Date.now() - 7 * 864e5), month = dayOf().slice(0, 7);
   const msgSubs = {};
   viewSubs.push(() => Object.values(msgSubs).forEach((f) => f()));
@@ -142,7 +142,8 @@ ROUTES.admin = async () => {
     $("#ad-sort").innerHTML = `<span class="small muted">Trier :</span>` + Object.entries(SORTS).map(([k, [l]]) => `<button type="button" class="chip sm" data-so="${k}" aria-pressed="${sort === k}">${l}</button>`).join("");
     // liste des salons (idées 2, 3, 15) ; le détail s'ouvre à la demande
     const list = rows.filter((s) => keep(s) && (!q || `${s.name} ${s.quartier || ""} ${s.tel || ""} ${s.id}`.toLowerCase().includes(q))).sort(SORTS[sort][1]);
-    if (!$("#ad-list").contains(document.activeElement) || !document.activeElement.closest("[data-keep]")) $("#ad-list").innerHTML = list.length ? list.map((s) => {
+    const typing = $("#ad-list").contains(document.activeElement) && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
+    if (!typing) $("#ad-list").innerHTML = list.length ? list.map((s) => {
       const a = act[s.id], [st, cls] = salonState(s, a), e = errs.filter((x) => x.sid === s.id).length, p = paysOf(s.id)[0], te = trialEnd(s), u = unread(s.id);
       return `<div class="card ad-row" data-sid="${esc(s.id)}"><div class="head-row"><div><b>${esc(s.name)}</b> <span class="code small">${esc(s.id)}</span><br><span class="small muted">${esc(s.quartier || "")}${s.tel ? " · " + esc(s.tel) : ""} · inscrit le ${s.created ? dateFr(s.created) : "?"} · ${(s.coiffeurs || []).length} coiffeur(s)</span></div><span class="st st-${cls}">${st}</span></div>
         <span class="small">${a ? `${a.tickets} tickets, ${a.rdv} rendez-vous${a.ventes != null ? `, ${a.ventes} coupes encaissées` : ""} cette semaine${a.last ? " · dernier ticket " + dayLabel(a.last).toLowerCase() : ""}` : "Activité…"}${e ? ` · <b class="msg-ko">${e} erreur${e > 1 ? "s" : ""}</b>` : ""}</span>
@@ -176,7 +177,7 @@ ROUTES.admin = async () => {
       <p class="small muted">Le salon est suspendu automatiquement ce jour-là (s'il n'a pas payé, par exemple).</p>` : ""}
       <h3>Messages</h3>${thread(s)}
       ${boss ? `<h3>Dépannage</h3><div class="row"><button class="btn-ghost sm" type="button" data-ad="code">Nouveau code coiffeur</button><button class="btn-ghost sm" type="button" data-ad="unlink">Déconnecter tous les coiffeurs</button><button class="btn-ghost sm" type="button" data-ad="transfer">Transférer à un nouveau patron</button></div>
-      <p class="small muted">Patron qui a perdu son téléphone : il se reconnecte avec le même compte Google ou e-mail sur le nouveau téléphone. S'il a perdu son compte, transfère le salon.</p><div class="ad-out"></div>` : ""}
+      <p class="small muted">Patron qui a perdu son téléphone : il se reconnecte avec le même compte Google ou e-mail sur le nouveau téléphone. S'il a perdu son compte, transfère le salon.</p><div class="ad-out">${outs[s.id] || ""}</div>` : ""}
       ${L.length ? `<h3>Historique</h3>${L.map((l) => `<p class="small muted">${new Date(l.at).toLocaleString("fr-FR")} · ${esc(l.action)}</p>`).join("")}` : ""}</div>`;
   }
   function thread(s) {
@@ -278,14 +279,14 @@ ROUTES.admin = async () => {
       if (a === "unblockAt") { await Store.updateSalon(s.id, { blockAt: 0 }); journal("Suspension programmée annulée", s.id); toast("Suspension programmée annulée"); }
       if (a === "send") { const text = val("msg"); if (!text) return; await Store.add(s.id, "messages", { from: "equipe", text, at: Date.now(), lu: false, by: Store.uid }); card.querySelector('[data-pf="msg"]').value = ""; journal("Message envoyé au patron", s.id); }
       // téléphone perdu ou coiffeur parti (idée 35)
-      if (a === "code") { const c = Array.from(crypto.getRandomValues(new Uint8Array(4)), (x) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[x % 32]).join(""); await Store.merge(s.id, "private", "config", { staffCode: c }); journal("Nouveau code coiffeur", s.id); card.querySelector(".ad-out").innerHTML = `<p class="small">Nouveau code coiffeur : <b class="code">${esc(s.id)}-${c}</b>. L'ancien QR ne marche plus.</p>`; }
+      if (a === "code") { const c = Array.from(crypto.getRandomValues(new Uint8Array(4)), (x) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[x % 32]).join(""); await Store.merge(s.id, "private", "config", { staffCode: c }); journal("Nouveau code coiffeur", s.id); card.querySelector(".ad-out").innerHTML = outs[s.id] = `<p class="small">Nouveau code coiffeur : <b class="code">${esc(s.id)}-${c}</b>. L'ancien QR ne marche plus.</p>`; }
       if (a === "unlink") { const n = await Store.unlinkStaff(s.id); journal(`${n} téléphone(s) coiffeur déconnecté(s)`, s.id); toast(`${n} téléphone${n > 1 ? "s" : ""} déconnecté${n > 1 ? "s" : ""}`); }
       // transfert à un nouveau patron (idée 36) : lien à usage unique
       if (a === "transfer") {
         const c = Array.from(crypto.getRandomValues(new Uint8Array(6)), (x) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[x % 32]).join("");
         await Store.set(s.id, "private", "transfer", { code: c, at: Date.now() }); journal("Lien de transfert créé", s.id);
         const link = `${baseUrl()}#reprendre/${s.id}-${c}`, text = `Bonjour, voici le lien pour reprendre le salon ${s.name} dans l'appli Salon. Connecte-toi avec ton compte et le salon sera à toi : ${link}`;
-        card.querySelector(".ad-out").innerHTML = `<div class="qr-box"><div class="qr-print"><b>${esc(s.name)}</b>${qrSvg(link, 200)}<span>Nouveau patron : scanne pour reprendre le salon</span></div><div class="stack"><p class="small">Le nouveau patron ouvre ce lien et se connecte : le salon passe à son compte, l'ancien patron n'y a plus accès. Le lien ne sert qu'une fois.</p>
+        card.querySelector(".ad-out").innerHTML = outs[s.id] = `<div class="qr-box"><div class="qr-print"><b>${esc(s.name)}</b>${qrSvg(link, 200)}<span>Nouveau patron : scanne pour reprendre le salon</span></div><div class="stack"><p class="small">Le nouveau patron ouvre ce lien et se connecte : le salon passe à son compte, l'ancien patron n'y a plus accès. Le lien ne sert qu'une fois.</p>
           <a class="btn-ghost sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(text)}">Envoyer par WhatsApp</a></div></div>`;
       }
     } catch (er) { toast("Refusé : vérifie les règles Firebase (ou ce compte n'a pas ce droit)."); }

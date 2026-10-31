@@ -218,6 +218,11 @@ function tabs(route) {
   nav.innerHTML = items.map(([h, l, d]) => `<a href="#${h}"${route === h || (h === "salon" && route === "offres") || (h === "clients" && route === "clients") ? ' aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span>${h === "salon" && low ? `<i class="badge">${low}</i>` : ""}</a>`).join("");
 }
 
+// Nouveautés affichées sur l'accueil (la plus récente en premier)
+const NOUVEAUTES = [
+  ["31 oct.", "Connexion par numéro de téléphone et code secret de 6 chiffres, sans SMS."],
+  ["31 oct.", "Crédit client, liste noire, pause, verrou de la caisse, objectif du mois, fermetures et Ramadan, gérant, rapport de la semaine, photo avant / après."],
+];
 // ---------- Accueil : choisir son rôle
 ROUTES.accueil = () => {
   // le propriétaire de l'appli arrive directement sur son espace admin
@@ -240,6 +245,7 @@ ROUTES.accueil = () => {
       </form>
       <a class="role" href="#demarrer/auto"><b>Se connecter</b><span>Patron : ton salon, ta caisse et ton bilan. Nouveau ? Crée ton salon en une minute.</span></a>
     </div>
+    <details class="card news"><summary><b>Nouveautés</b></summary><ul class="small">${NOUVEAUTES.map(([d, x]) => `<li><b>${d}</b> · ${esc(x)}</li>`).join("")}</ul></details>
     <p class="small" style="text-align:center"><a class="muted" href="#admin">Espace propriétaire de l'appli</a></p>`;
   // un seul code pour tout le monde : code du salon = client, code du salon + code coiffeur = coiffeur
   $("#cli").onsubmit = (e) => {
@@ -280,19 +286,29 @@ window.addEventListener("appinstalled", () => { const c = $("#inst-card"); if (c
 ROUTES.demarrer = async (mode) => {
   if (!Store.isAccount()) {
     $view.innerHTML = `${ME.invite ? installCard() : ""}<h1>Se connecter</h1>
-      <div class="card"><p>Ton compte garde les chiffres du salon, même si tu changes de téléphone.</p>
-        <button class="btn" id="g" type="button">Continuer avec Google</button></div>
-      <form class="card" id="em" data-keep><h2>Ou avec un e-mail</h2>
-        <input class="field" id="em-mail" type="email" placeholder="E-mail" autocomplete="email" required>
-        <input class="field" id="em-pass" type="password" placeholder="Mot de passe (6 caractères ou plus)" minlength="6" autocomplete="current-password" required>
-        <div class="row"><button class="btn" data-a="in">Se connecter</button><button class="btn alt" data-a="new">Créer le compte</button></div>
-        <p class="small" id="em-msg"></p></form>`;
+      <form class="card" id="ph" data-keep novalidate>
+        <label class="lbl" for="ph-nom">Ton prénom et ton nom (nouveau compte)</label><input class="field" id="ph-nom" maxlength="40" autocomplete="name">
+        <label class="lbl" for="ph-tel">Ton numéro de téléphone (77 123 45 67)</label><input class="field" id="ph-tel" type="tel" inputmode="tel" maxlength="20" autocomplete="tel" value="${esc((ME.invite && ME.invite.t) || ME.tel || "")}">
+        <label class="lbl" for="ph-pin">Code à 6 chiffres</label><input class="field pin-in" id="ph-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password">
+        <div class="row two"><button class="btn alt" type="button" data-p="new">Créer mon compte</button><button class="btn" type="button" data-p="in">Me connecter</button></div>
+        <p class="small" id="ph-msg" role="alert"></p>
+        <p class="small muted">Première fois ? Choisis un code secret de 6 chiffres pour l'appli. Ce n'est pas ton code Wave ou Orange Money : ne le donne jamais.</p>
+        <a class="small" target="_blank" rel="noopener" href="${waLink(CFG.contact, "Bonjour, j'ai oublié mon code de l'appli Salon. Mon numéro : ")}">Code oublié ? Écris à l'administrateur sur WhatsApp</a></form>`;
     bindInstall();
-    $("#g").onclick = () => Store.signIn().then(render, (e) => toast("Connexion impossible : " + (e.code || e.message)));
-    let mode = "in";
-    $$("#em button").forEach((b) => (b.onclick = () => { mode = b.dataset.a; }));
-    $("#em").onsubmit = (e) => { e.preventDefault(); $("#em-msg").textContent = "…";
-      Store.signInEmail($("#em-mail").value.trim(), $("#em-pass").value, mode === "new").then(render, (er) => { $("#em-msg").className = "small msg-ko"; $("#em-msg").textContent = /wrong-password|invalid-cred|user-not-found/.test(er.code) ? "E-mail ou mot de passe incorrect." : /email-already/.test(er.code) ? "Ce compte existe déjà : appuie sur Se connecter." : "Connexion impossible. Vérifie le réseau."; }); };
+    $("#ph").onclick = async (e) => {
+      const b = e.target.closest("[data-p]"); if (!b) return;
+      const nom = $("#ph-nom").value.trim(), tel = $("#ph-tel").value, code = $("#ph-pin").value.trim(), msg = $("#ph-msg"), ko = (t) => { msg.className = "small msg-ko"; msg.textContent = t; };
+      if (b.dataset.p === "new" && nom.length < 2) return ko("Écris ton prénom et ton nom pour créer le compte.");
+      if (!Store.telOk(tel)) return ko("Numéro invalide : écris les 9 chiffres, par exemple 77 123 45 67.");
+      if (!/^\d{6}$/.test(code)) return ko("Le code doit avoir exactement 6 chiffres.");
+      msg.className = "small"; msg.textContent = "…";
+      try {
+        if (b.dataset.p === "new") await Store.createPhone(tel, code, nom); else await Store.signInPhone(tel, code);
+        // base des numéros : le patron y entre dès sa connexion, l'admin le voit
+        Store.inscrire(tel, nom || Store.name, "patron", "");
+        ME.tel = Store.telKey(tel); saveMe(); toast(b.dataset.p === "new" ? "Compte créé" : "Connecté"); render();
+      } catch (er) { ko(phoneError(er)); }
+    };
     return;
   }
   // reprise d'un salon (idée 36) : lien de transfert créé par l'admin
@@ -312,7 +328,7 @@ ROUTES.demarrer = async (mode) => {
     <form class="card" id="new" data-keep><h2>${mine.length ? "Ajouter un salon" : "Créer mon salon"}</h2>${inv.n ? `<p class="small muted">Tes informations sont déjà remplies : vérifie-les, puis crée le salon.</p>` : ""}
       <label class="lbl" for="n-name">Nom du salon</label><input class="field" id="n-name" required maxlength="40" placeholder="Ex. Salon Teranga" value="${esc(inv.n || "")}">
       <label class="lbl" for="n-q">Quartier et ville</label><input class="field" id="n-q" maxlength="50" placeholder="Ex. Médina, Dakar" value="${esc(inv.q || "")}">
-      <label class="lbl" for="n-tel">Ton numéro WhatsApp</label><input class="field" id="n-tel" inputmode="tel" maxlength="20" required pattern="[0-9 +.]{9,20}" placeholder="Ex. 77 123 45 67" value="${esc(inv.t || "")}">
+      <label class="lbl" for="n-tel">Ton numéro WhatsApp</label><input class="field" id="n-tel" inputmode="tel" maxlength="20" required pattern="[0-9 +.]{9,20}" placeholder="Ex. 77 123 45 67" value="${esc(inv.t || ME.tel || Store.phone || "")}">
       <label class="lbl" for="n-coif">Prénoms des coiffeurs (séparés par des virgules)</label><input class="field" id="n-coif" maxlength="120" placeholder="Ex. Modou, Ibou, Pape" value="${esc(inv.c || "")}">
       <button class="btn">Créer le salon</button></form>`;
   $$("[data-sid]").forEach((b) => (b.onclick = () => { Object.assign(ME, { role: "patron", sid: b.dataset.sid }); saveMe(); go("file"); }));
@@ -332,6 +348,7 @@ ROUTES.demarrer = async (mode) => {
     catch (er) { toast("Création impossible. Vérifie le réseau."); }
   };
 };
+const phoneError = (er) => /email-already-in-use/.test(er.code || "") ? "Ce compte existe déjà : appuie sur « Me connecter »." : /invalid-credential|wrong-password|user-not-found|invalid-login/.test(er.code || "") ? "Numéro ou code incorrect." : /too-many-requests/.test(er.code || "") ? "Trop d'essais. Attends quelques minutes." : "La connexion n'a pas abouti. Réessaie.";
 ROUTES.reprendre = (arg) => { ME.reprendre = String(arg || "").toUpperCase(); Object.assign(ME, { role: null, sid: null }); saveMe(); go("demarrer"); };
 const defaultServices = () => [
   ["Dégradé", 1500, 25], ["Boule à zéro", 1000, 15], ["Barbe", 500, 10], ["Coupe et barbe", 2000, 35], ["Teinture", 2500, 40], ["Coupe enfant", 1000, 20],
@@ -718,7 +735,7 @@ ROUTES.salon = (part) => {
       <div class="stepper"><button type="button" class="btn-ghost sm" data-d="-1" aria-label="Moins">−</button><b class="tab">${x.qty}</b><button type="button" class="btn-ghost sm" data-d="1" aria-label="Plus">+</button></div><button type="button" class="btn-ghost sm" data-rm="st" aria-label="Supprimer">✕</button></div>`).join("") : `<p class="empty">Ajoute tes produits (lames, crèmes, teintures) pour être prévenu quand il en manque.</p>`;
     $("#s-wave").innerHTML = `${s.waveQr ? `<img class="wave-img" src="${s.waveQr}" alt="QR Wave du salon"><a class="btn alt" href="#wave/${esc(ME.sid)}">Afficher en grand pour le client</a>` : ""}<label class="btn ${s.waveQr ? "btn-ghost" : "alt"}">${s.waveQr ? "Changer la photo" : "Prendre la photo du QR Wave"}<input type="file" accept="image/*" hidden id="wave-f"></label>`;
     $("#wave-f").onchange = async (e) => { const f = e.target.files[0]; if (f) { await Store.updateSalon(ME.sid, { waveQr: await shrink(f, 700, 0.8) }); toast("QR Wave enregistré"); } };
-    $("#s-me").innerHTML = `<p class="small muted">Compte : ${esc(Store.email || "")}<br>Identifiant : <code>${esc(Store.uid || "")}</code></p>
+    if (!$("#s-me").contains(document.activeElement)) $("#s-me").innerHTML = `<p class="small muted">Compte : ${esc(Store.phone ? Store.phone.replace(/(\d{2})(\d{3})(\d{2})(\d{2})/, "$1 $2 $3 $4") : Store.email || "")}<br>Identifiant : <code>${esc(Store.uid || "")}</code></p>
       <div class="row"><button class="btn-ghost" type="button" id="me-sw">Changer de salon</button><button class="btn-ghost" type="button" id="me-out">Se déconnecter</button></div>`;
     $("#me-sw").onclick = () => { Object.assign(ME, { role: null, sid: null }); saveMe(); go("accueil"); };
     const out = $("#me-out"); if (out) out.onclick = async () => { await Store.signOut(); Object.assign(ME, { role: null, sid: null }); saveMe(); go("accueil"); };

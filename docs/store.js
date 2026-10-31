@@ -51,6 +51,18 @@ const Store = (() => {
     user = (create ? await auth.createUserWithEmailAndPassword(email, pass) : await auth.signInWithEmailAndPassword(email, pass)).user;
     return user;
   }
+  // Connexion par numéro de téléphone et code secret de 6 chiffres, sans SMS (fournisseur E-mail/Mot de passe gratuit) :
+  // le numéro devient une adresse e-mail fabriquée, invisible pour le patron, et le code sert de mot de passe
+  const TEL_DOMAIN = "@tel.salon.app";
+  const telKey = (tel) => String(tel || "").replace(/\D/g, "").replace(/^(00)?221/, "");
+  const telOk = (tel) => /^[37]\d{8}$/.test(telKey(tel));
+  async function createPhone(tel, code, nom) {
+    user = (await auth.createUserWithEmailAndPassword(telKey(tel) + TEL_DOMAIN, code)).user;
+    await user.updateProfile({ displayName: nom }).catch(() => {});
+    return user;
+  }
+  async function signInPhone(tel, code) { user = (await auth.signInWithEmailAndPassword(telKey(tel) + TEL_DOMAIN, code)).user; return user; }
+  const phone = () => { if (!user) return ""; const e = [user.email, ...(user.providerData || []).map((p) => p.email)].find((x) => (x || "").endsWith(TEL_DOMAIN)); return e ? e.split("@")[0] : ""; };
   async function signOut() { if (auth) await auth.signOut(); user = null; }
   const isAccount = () => !!(user && !user.isAnonymous);
 
@@ -188,9 +200,10 @@ const Store = (() => {
   const removeError = (id) => db.collection("erreurs").doc(id).delete();
 
   return {
-    init, ensureUser, signIn, signInEmail, signOut, isAccount,
+    init, ensureUser, signIn, signInEmail, signInPhone, createPhone, telOk, telKey, signOut, isAccount,
+    get phone() { return phone(); }, get name() { return user ? user.displayName || "" : ""; },
     get uid() { return user ? user.uid : null; },
-    get email() { return user ? user.email || "" : ""; },
+    get email() { return user && !(user.email || "").endsWith(TEL_DOMAIN) ? user.email || "" : ""; },
     createSalon, watchSalon, getSalon, updateSalon, mySalons, watchDirectory,
     watch, add, set, merge, update, remove, getDoc, nextNumber,
     staffCode, newStaffCode, joinStaff, watchAllSalons, activity, usage, logError, watchErrors, removeError,

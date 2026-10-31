@@ -1,4 +1,4 @@
-const CACHE = "salon-v15";
+const CACHE = "salon-v16";
 const SHELL = ["./", "index.html", "app.css", "app.js", "plus.js", "suite.js", "admin.js", "store.js", "config.js", "vendor/qrcode.js", "manifest.webmanifest", "icons/icon-192.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k.startsWith("salon-") && k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });

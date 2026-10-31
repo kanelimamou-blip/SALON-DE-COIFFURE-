@@ -28,9 +28,13 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
 
   // 1. Le patron crée son compte et son salon
   const pat = await phone('patron'); await pat.goto(U + '#demarrer'); await W(pat, 2500);
-  const PAT = `patron${Date.now()}@test.sn`;
-  await pat.fill('#em-mail', PAT); await pat.fill('#em-pass', 'secret123'); await pat.click('#em [data-a="new"]'); await W(pat, 3000);
-  await pat.fill('#n-name', 'Salon Essai'); await pat.fill('#n-q', 'Médina'); await pat.fill('#n-tel', '771112233'); await pat.fill('#n-coif', 'Modou, Ibou');
+  // connexion par numéro et code à 4 chiffres : le compte se crée la première fois
+  const PAT = '77' + String(Date.now()).slice(-7), NPT = '33' + String(Date.now() + 7).slice(-7);
+  await pat.fill('#ph-tel', '12 34'); await pat.fill('#ph-pin', '135799'); await pat.click('#ph [data-p="in"]'); await W(pat, 300);
+  check((await txt(pat, '#ph-msg')).includes('Numéro invalide') && await pat.inputValue('#ph-tel') === '12 34', 'connexion : numéro invalide refusé, saisie gardée');
+  await pat.fill('#ph-nom', 'Modou Fall'); await pat.fill('#ph-tel', '+221 ' + PAT.replace(/(\d{2})(\d{3})/, '$1 $2 ')); await pat.click('#ph [data-p="new"]'); await W(pat, 3000);
+  check(await pat.inputValue('#n-tel') === PAT, 'patron : compte créé avec son numéro, numéro du salon prérempli');
+  await pat.fill('#n-name', 'Salon Essai'); await pat.fill('#n-q', 'Médina'); await pat.fill('#n-coif', 'Modou, Ibou');
   await pat.click('#new .btn'); await W(pat, 3000);
   const sid = (await pat.evaluate(() => JSON.parse(localStorage.getItem('salon-me')))).sid;
   check(/^[A-Z0-9]{5}$/.test(sid || ''), 'salon créé, code ' + sid);
@@ -150,7 +154,7 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   check(await neuf.isHidden('#adm-link') && (await txt(neuf, 'main')).includes('Espace propriétaire'), 'client : pas de bouton admin, lien discret en bas de l\'accueil');
   // 13. L'admin invite un nouveau patron : lien et QR code, salon prérempli chez le patron
   await adm.goto(U + '#admin'); await W(adm, 2500);
-  await adm.click('[data-tog="ad-p-inv"]'); await adm.click('#iv-quick'); await W(adm, 300); check(await adm.isVisible('.qr-full svg'), 'admin : QR plein écran pour un nouveau patron'); await adm.click('.qr-full'); await adm.fill('#iv-n', 'Salon Invité'); await adm.fill('#iv-q', 'Pikine'); await adm.fill('#iv-t', '771234567'); await adm.fill('#iv-c', 'Abdou, Lamine');
+  await adm.click('[data-tog="ad-p-inv"]'); await adm.click('#iv-quick'); await W(adm, 300); check(await adm.isVisible('.qr-full svg'), 'admin : QR plein écran pour un nouveau patron'); await adm.click('.qr-full'); await adm.fill('#iv-n', 'Salon Invité'); await adm.fill('#iv-q', 'Pikine'); await adm.fill('#iv-t', NPT); await adm.fill('#iv-c', 'Abdou, Lamine');
   await adm.click('#ad-inv .btn'); await W(adm, 1000);
   if (process.env.SHOTS) { await adm.evaluate(() => scrollTo(0, 0)); await adm.screenshot({ path: process.env.SHOTS + '/admin.png', fullPage: true }); }
   const link = await adm.evaluate(() => document.querySelector('#iv-out a[href*="wa.me"]').href);
@@ -159,7 +163,8 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   const np = await phone('nouveau-patron'); await np.goto(inviteUrl); await W(np, 2500);
   check((await txt(np, 'main')).includes('Installe l\'appli'), 'nouveau patron : invitation à installer l\'appli dès l\'ouverture du lien');
   if (process.env.SHOTS) await np.screenshot({ path: process.env.SHOTS + '/invite.png' });
-  await np.fill('#em-mail', `np${Date.now()}@test.sn`); await np.fill('#em-pass', 'patron123'); await np.click('#em [data-a="new"]'); await W(np, 3000);
+  check(await np.inputValue('#ph-tel') === NPT, 'nouveau patron : son numéro est déjà rempli');
+  await np.fill('#ph-nom', 'Abdou Ndiaye'); await np.fill('#ph-pin', '246802'); await np.click('#ph [data-p="new"]'); await W(np, 3000);
   check(await np.inputValue('#n-name') === 'Salon Invité' && await np.inputValue('#n-coif') === 'Abdou, Lamine', 'nouveau patron : salon prérempli après l\'inscription');
   await np.click('#new .btn'); await W(np, 3000);
   await adm.goto(U + '#admin'); await W(adm, 3000);
@@ -167,7 +172,11 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   // 14. Le patron se reconnecte sur un autre téléphone : « Se connecter » l'emmène directement dans son salon
   const pat2 = await phone('patron-2'); await pat2.goto(U); await W(pat2, 2500);
   await pat2.click('a[href="#demarrer/auto"]'); await W(pat2, 2000);
-  await pat2.fill('#em-mail', PAT); await pat2.fill('#em-pass', 'secret123'); await pat2.click('#em [data-a="in"]'); await W(pat2, 4000);
+  await pat2.fill('#ph-tel', PAT); await pat2.fill('#ph-pin', '999999'); await pat2.click('#ph [data-p="in"]'); await W(pat2, 3000);
+  check((await txt(pat2, '#ph-msg')).includes('Numéro ou code incorrect'), 'patron : mauvais code refusé');
+  await pat2.fill('#ph-nom', 'X Y'); await pat2.click('#ph [data-p="new"]'); await W(pat2, 2500);
+  check((await txt(pat2, '#ph-msg')).includes('existe déjà'), 'patron : compte existant signalé');
+  await pat2.fill('#ph-pin', '135799'); await pat2.click('#ph [data-p="in"]'); await W(pat2, 4000);
   check(pat2.url().endsWith('#file') && (await txt(pat2, '#tabs')).includes('Bilan'), 'patron : « Se connecter » ouvre directement son salon');
   await coi.goto(U + '#file'); await W(coi, 2500); await coi.click('#f-qr'); await W(coi, 500);
   check(await coi.isVisible('.qr-full svg'), 'coiffeur : QR client affiché en grand');
@@ -180,7 +189,7 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   await adm.goto(U + '#admin'); await W(adm, 3500);
   await adm.click('[data-tab="base"]'); await W(adm, 800);
   const bt = await txt(adm, '#ad-base');
-  check(bt.includes('Fallou') && bt.includes('770000001') && bt.includes('771112233'), 'admin : numéros du client et du patron dans la base');
+  check(bt.includes('Fallou') && bt.includes('770000001') && bt.includes(PAT), 'admin : numéros du client et du patron dans la base');
   const peekBase = await cli.evaluate(async () => { try { await firebase.firestore().collection('base').get(); return 'accepté'; } catch (e) { return e.code; } });
   check(peekBase === 'permission-denied', 'règles : un client ne lit pas la base des numéros (' + peekBase + ')');
   await adm.click('[data-tab="invit"]'); await W(adm, 800);
@@ -190,7 +199,7 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   check((await txt(adm, `[data-sid="${sid}"] .ad-detail`)).includes('Fonctions utilisées'), 'admin : détail du salon (courbe et fonctions)');
   check((await txt(adm, `[data-sid="${sid}"]`)).includes('Essai jusqu'), 'admin : fin de l\'essai affichée');
   await adm.click(`[data-sid="${sid}"] [data-ad="pay"]`); await W(adm, 2500);
-  check((await txt(adm, '#ad-kpi')).includes('2 000 F'), 'admin : paiement de 2 000 F noté, total du mois');
+  check((await txt(adm, `[data-sid="${sid}"]`)).includes('Dernier paiement : 2 000 F') && (await txt(adm, '#ad-kpi')).includes('encaissé par toi'), 'admin : paiement de 2 000 F noté, total du mois');
   await adm.fill(`[data-sid="${sid}"] [data-pf="msg"]`, 'Bonjour patron, tout va bien ?'); await adm.click(`[data-sid="${sid}"] [data-ad="send"]`); await W(adm, 2500);
   await pat.goto(U + '#salon'); await W(pat, 3000);
   check((await txt(pat, '#s-msg')).includes('message'), 'patron : message de l\'équipe signalé');
@@ -214,14 +223,14 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   await adm.click(`[data-sid="${sid2}"] [data-ad="transfer"]`); await W(adm, 2500);
   const tlink = decodeURIComponent((await adm.evaluate((s) => document.querySelector(`[data-sid="${s}"] .ad-out a[href*="wa.me"]`).href, sid2)).split('text=')[1]).match(/http\S+/)[0];
   const rp = await phone('repreneur'); await rp.goto(tlink); await W(rp, 2500);
-  await rp.fill('#em-mail', `rp${Date.now()}@test.sn`); await rp.fill('#em-pass', 'repris123'); await rp.click('#em [data-a="new"]'); await W(rp, 4000);
+  await rp.fill('#ph-nom', 'Ousmane Repreneur'); await rp.fill('#ph-tel', '76' + String(Date.now()).slice(-7)); await rp.fill('#ph-pin', '424242'); await rp.click('#ph [data-p="new"]'); await W(rp, 4000);
   const own = await rp.evaluate(async (sid) => (await firebase.firestore().collection('salons').doc(sid).get()).data().owner === firebase.auth().currentUser.uid, sid2);
   check(own && rp.url().includes('#salon'), 'transfert : le nouveau patron reprend le salon');
   const again = await np.evaluate(async (sid) => { try { await firebase.firestore().collection('salons').doc(sid).update({ name: 'Volé' }); return 'accepté'; } catch (e) { return e.code; } }, sid2);
   check(again === 'permission-denied', 'transfert : l\'ancien patron n\'a plus la main (' + again + ')');
   // associé en lecture seule
   const as = await phone('associe'); await as.goto(U + '#demarrer'); await W(as, 2500);
-  await as.fill('#em-mail', `as${Date.now()}@test.sn`); await as.fill('#em-pass', 'associe1'); await as.click('#em [data-a="new"]'); await W(as, 3000);
+  await as.fill('#ph-nom', 'Awa Associée'); await as.fill('#ph-tel', '70' + String(Date.now()).slice(-7)); await as.fill('#ph-pin', '515151'); await as.click('#ph [data-p="new"]'); await W(as, 3000);
   const asUid = await as.evaluate(() => firebase.auth().currentUser.uid);
   await adm.click('[data-tog="ad-p-as"]'); await W(adm, 500); await adm.fill('#as-uid', asUid); await adm.click('#as-add'); await W(adm, 2500);
   await as.goto(U + '#admin'); await W(as, 4000);
