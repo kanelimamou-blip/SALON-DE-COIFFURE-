@@ -67,6 +67,7 @@ ROUTES.admin = async () => {
         <button class="btn">Créer le lien et le QR code</button></form><div id="iv-out"></div></div>` : ""}
     <button type="button" class="ad-tog" data-tog="ad-p-map" aria-expanded="false">🗺 Carte des salons</button>
     <div class="card" id="ad-p-map" hidden><div id="ad-map" class="ad-map"></div><p class="small muted" id="ad-map-n"></p></div>
+    ${boss ? `<button type="button" class="ad-tog" data-tog="ad-p-reg" aria-expanded="false">⚙️ Réglages de l'appli</button><div class="card" id="ad-p-reg" hidden><div id="ad-reg"></div></div>` : ""}
     ${boss ? `<button type="button" class="ad-tog" data-tog="ad-p-as" aria-expanded="false">👥 Associés (lecture seule)</button><div class="card" id="ad-p-as" hidden><div id="ad-as"></div></div>` : ""}
     <div class="chips scroll ad-tabs2" id="ad-tabs"></div>
     <div id="ad-t-comptes" data-t>
@@ -82,7 +83,7 @@ ROUTES.admin = async () => {
     <div id="ad-t-erreurs" data-t hidden><div id="ad-err" class="list"></div></div>
     <div id="ad-t-journal" data-t hidden></div>`;
   $("#ad-reload").onclick = () => render();
-  $$(".ad-tog").forEach((b) => (b.onclick = () => { const p = $("#" + b.dataset.tog), o = p.hidden; p.hidden = !o; b.setAttribute("aria-expanded", o); if (o && b.dataset.tog === "ad-p-map") drawMap(rows); if (o && b.dataset.tog === "ad-p-as") paintAssoc(); }));
+  $$(".ad-tog").forEach((b) => (b.onclick = () => { const p = $("#" + b.dataset.tog), o = p.hidden; p.hidden = !o; b.setAttribute("aria-expanded", o); if (o && b.dataset.tog === "ad-p-map") drawMap(rows); if (o && b.dataset.tog === "ad-p-as") paintAssoc(); if (o && b.dataset.tog === "ad-p-reg") paintReglages(); }));
   $("#ad-kpi").onclick = (e) => {
     const b = e.target.closest("[data-kpi]"); if (!b) return;
     const [t, f] = b.dataset.kpi.split(":"); tab = ME.adTab = t; saveMe();
@@ -178,7 +179,7 @@ ROUTES.admin = async () => {
       ${boss ? `<h3>Abonnement (payé hors de l'appli)</h3>
       <p class="small">${trialEnd(s) > Date.now() ? `Essai gratuit jusqu'au <b>${dateFr(trialEnd(s))}</b>.` : `Essai fini le ${dateFr(trialEnd(s))}.`} ${P.length ? `${P.length} paiement${P.length > 1 ? "s" : ""}, ${fcfa(P.reduce((x, p) => x + p.amount, 0))} au total.` : "Aucun paiement noté."}</p>
       ${P.slice(0, 5).map((p) => `<div class="v-item small"><span>${dateFr(p.at)}</span><div class="q-main">${esc(PAY[p.via] || p.via || "")}${p.note ? " · " + esc(p.note) : ""}</div><b>${fcfa(p.amount)}</b></div>`).join("")}
-      <div class="row"><select class="field" data-pf="amt" aria-label="Montant"><option value="${CFG.prix.mois}">${fcfa(CFG.prix.mois)} (1 mois)</option><option value="${CFG.prix.an}">${fcfa(CFG.prix.an)} (1 an)</option><option value="1000">${fcfa(1000)} (fondateur)</option></select>
+      <div class="row"><select class="field" data-pf="amt" aria-label="Montant"><option value="${CFG.prix.mois}">${fcfa(CFG.prix.mois)} (1 mois)</option><option value="${CFG.prix.an}">${fcfa(CFG.prix.an)} (1 an)</option><option value="${CFG.prix.fondateur || 1000}">${fcfa(CFG.prix.fondateur || 1000)} (fondateur)</option></select>
         <select class="field" data-pf="via" aria-label="Payé par">${Object.entries(PAY).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select><button class="btn sm" type="button" data-ad="pay">Noter le paiement</button></div>
       ${s.tel ? `<a class="btn-ghost sm" target="_blank" rel="noopener" href="${waLink(s.tel, relanceText(s))}">Relancer l'abonnement sur WhatsApp</a>` : `<p class="small muted">Pas de numéro WhatsApp pour ce salon.</p>`}
       <h3>Suspension programmée</h3><div class="row"><input class="field" type="date" data-pf="blockAt" value="${s.blockAt ? dayOf(s.blockAt) : ""}" aria-label="Date de suspension"><button class="btn-ghost sm" type="button" data-ad="blockAt">Programmer</button>${s.blockAt ? `<button class="btn-ghost sm" type="button" data-ad="unblockAt">Annuler</button>` : ""}</div>
@@ -256,6 +257,26 @@ ROUTES.admin = async () => {
     const names = Object.fromEntries(rows.map((s) => [s.id, s.name]));
     el.innerHTML = `<p class="small muted">Tout ce qui a été fait depuis l'espace admin, et par qui.</p><div class="list">${logs.map((l) => `<div class="v-item small"><span class="muted tab">${new Date(l.at).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span><div class="q-main"><b>${esc(names[l.sid] || l.sid || "")}</b><span>${esc(l.action)}${l.by !== Store.uid ? " · associé" : ""}</span></div></div>`).join("") || `<p class="empty">Rien pour le moment.</p>`}</div>`;
   }
+  // Réglages de l'appli : l'admin change prix, essai, numéro, coupes par défaut, nouveautés et annonce sans toucher au code
+  function paintReglages() {
+    const r = REG, p = CFG.prix, svc = regServices().map((x) => x.join(" ; ")).join("\n");
+    $("#ad-reg").innerHTML = `<form id="rg-f" class="stack" data-keep>
+      <h3>Abonnement</h3><div class="row"><label class="mini">Par mois <input class="field num-f" id="rg-m" inputmode="numeric" value="${p.mois}"> F</label><label class="mini">Par an <input class="field num-f" id="rg-a" inputmode="numeric" value="${p.an}"> F</label></div>
+      <div class="row"><label class="mini">Fondateur <input class="field num-f" id="rg-fo" inputmode="numeric" value="${p.fondateur || 1000}"> F</label><label class="mini">Essai gratuit <input class="field num-f" id="rg-e" inputmode="numeric" value="${p.essaiJours}"> jours</label></div>
+      <label class="lbl" for="rg-c">Ton numéro WhatsApp (contact, code oublié, salon suspendu)</label><input class="field" id="rg-c" inputmode="tel" maxlength="20" value="${esc(CFG.contact)}">
+      <label class="lbl" for="rg-an">Annonce à tous les patrons (vide = aucune)</label><textarea class="field" id="rg-an" rows="2" maxlength="300" placeholder="Ex. Nouvelle fonction : le crédit client !">${esc(r.annonce || "")}</textarea>
+      <label class="lbl" for="rg-s">Coupes et prix proposés aux nouveaux salons (une par ligne : nom ; prix ; minutes)</label><textarea class="field" id="rg-s" rows="6">${esc(svc)}</textarea>
+      <label class="lbl" for="rg-n">Nouveautés sur l'accueil (une par ligne : date · texte)</label><textarea class="field" id="rg-n" rows="4">${esc(NOUVEAUTES.map(([d, x]) => (d ? d + " · " : "") + x).join("\n"))}</textarea>
+      <button class="btn">Enregistrer les réglages</button><p class="small muted">Les téléphones prennent les nouveaux réglages à leur prochaine ouverture.</p></form>`;
+    $("#rg-f").onsubmit = async (e) => {
+      e.preventDefault();
+      const num = (id) => +$(id).value.replace(/\D/g, "") || 0, lines = (id) => $(id).value.split("\n").map((x) => x.trim()).filter(Boolean);
+      const services = lines("#rg-s").map((l) => { const [n, pr, d] = l.split(/[;|]/).map((x) => x.trim()); return { n, p: +String(pr || "").replace(/\D/g, "") || 0, d: +String(d || "").replace(/\D/g, "") || 20 }; }).filter((x) => x.n);
+      const r2 = { prix: { mois: num("#rg-m"), an: num("#rg-a"), fondateur: num("#rg-fo"), essaiJours: num("#rg-e") || 30 }, contact: $("#rg-c").value.trim(), annonce: $("#rg-an").value.trim(), services, nouveautes: lines("#rg-n"), at: Date.now() };
+      try { await Store.setTop("reglages", "app", r2); applyReglages(r2); journal("Réglages de l'appli modifiés"); toast("Réglages enregistrés"); paint(); }
+      catch (er) { toast("Refusé : recolle les règles Firebase."); }
+    };
+  }
   // Associés (idée 46) : lecture seule, réponses aux patrons
   function paintAssoc() {
     const el = $("#ad-as"), list = (ASSOC && ASSOC.associes) || [];
@@ -302,6 +323,17 @@ ROUTES.admin = async () => {
   paint();
 };
 
+// ---------- Modifications faites par l'admin dans le salon d'un client : notées dans le journal (une fois par minute et par rubrique)
+const editLog = {};
+function adminEdit(sid, what) {
+  if (!isAdmin() || !LIVE.salon || LIVE.salon.id !== sid || LIVE.salon.owner === Store.uid) return;
+  const k = sid + what; if (editLog[k] && Date.now() - editLog[k] < 6e4) return; editLog[k] = Date.now();
+  journal("Modifié en vue patron : " + what, sid);
+}
+const COL_FR = { queue: "file", ventes: "caisse", depenses: "dépenses", stock: "stock", rdv: "rendez-vous", clients: "clients", galerie: "galerie", pointage: "pointage", credits: "crédits", contacts: "numéros", private: "code coiffeur" };
+["add", "set", "merge", "update", "remove"].forEach((m) => { const f = Store[m]; Store[m] = (sid, col, ...rest) => { adminEdit(sid, COL_FR[col] || col); return f(sid, col, ...rest); }; });
+{ const f = Store.updateSalon; Store.updateSalon = (sid, patch) => { adminEdit(sid, Object.keys(patch).join(", ")); return f(sid, patch); }; }
+
 // ---------- Carte des salons (idée 5) : OpenStreetMap, chargée seulement quand on l'ouvre
 function drawMap(rows) {
   const pts = rows.filter((s) => s.lat && s.lng && !s.demo);
@@ -342,7 +374,7 @@ window.demoBar = () => {
   bar.hidden = !ME.demo || !isAdmin() || document.body.dataset.route === "admin";
   if (bar.hidden) return;
   const cur = ME.role;
-  bar.innerHTML = `<span class="small">${ME.sid && LIVE.salon && LIVE.salon.owner !== Store.uid ? `Vue de <b>${esc(LIVE.salon.name)}</b>` : "Présentation"}</span>${[["patron", "Patron"], ["coiffeur", "Coiffeur"], ["client", "Client"]].map(([r, l]) => `<button type="button" class="chip sm" data-dr="${r}" aria-pressed="${cur === r}">${l}</button>`).join("")}<button type="button" class="btn-ghost sm" data-dr="fin" aria-label="Quitter la présentation">✕</button>`;
+  bar.innerHTML = `<span class="small">${ME.sid && LIVE.salon && LIVE.salon.owner !== Store.uid ? `<b>${esc(LIVE.salon.name)}</b> · tu peux tout modifier` : "Présentation"}</span>${[["patron", "Patron"], ["coiffeur", "Coiffeur"], ["client", "Client"]].map(([r, l]) => `<button type="button" class="chip sm" data-dr="${r}" aria-pressed="${cur === r}">${l}</button>`).join("")}<button type="button" class="btn-ghost sm" data-dr="fin" aria-label="Quitter la présentation">✕</button>`;
   bar.onclick = (e) => {
     const b = e.target.closest("[data-dr]"); if (!b) return;
     if (b.dataset.dr === "fin") { Object.assign(ME, { demo: null, role: null, sid: null, coiffeurId: null }); saveMe(); return go("admin"); }

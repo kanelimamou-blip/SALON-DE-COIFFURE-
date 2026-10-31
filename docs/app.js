@@ -15,6 +15,17 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const PAY = { cash: "Espèces", wave: "Wave", om: "Orange Money" };
 const DEP_CATS = ["Loyer", "Électricité", "Produits", "Lames", "Eau", "Autre"];
 
+// ---------- Réglages de l'appli, modifiables par l'admin (reglages/app) : prix, essai, numéro, coupes par défaut, nouveautés, annonce
+let REG = {};
+function applyReglages(r) {
+  REG = r || {};
+  if (REG.prix) Object.assign(CFG.prix, REG.prix);
+  if (REG.contact) CFG.contact = REG.contact;
+  if (REG.nouveautes && REG.nouveautes.length) NOUVEAUTES = REG.nouveautes.map((x) => { const i = x.indexOf("·"); return i > 0 ? [x.slice(0, i).trim(), x.slice(i + 1).trim()] : ["", x]; });
+}
+const annonceBar = () => { const el = $("#annonce"); if (!el) return; const show = ME.role === "patron" && REG.annonce && ME.annonceVue !== REG.annonce; el.hidden = !show; if (show) el.innerHTML = `<span>📣 ${esc(REG.annonce)}</span><button type="button" class="btn-ghost sm" aria-label="Fermer l'annonce">✕</button>`; };
+document.addEventListener("click", (e) => { if (e.target.closest("#annonce button")) { ME.annonceVue = REG.annonce; saveMe(); annonceBar(); } });
+
 // ---------- Ce téléphone : rôle, salon, tickets pris
 const ME = (() => { try { return JSON.parse(localStorage.getItem("salon-me")) || {}; } catch (e) { return {}; } })();
 const saveMe = () => { try { localStorage.setItem("salon-me", JSON.stringify(ME)); } catch (e) {} };
@@ -196,6 +207,7 @@ function render() {
   if (isStaff() && ME.sid) follow(ME.sid, ME.role);
   tabs(route);
   if (window.demoBar) demoBar();
+  annonceBar();
   $("#adm-link").hidden = !(typeof isAdmin === "function" && isAdmin()) || route === "admin";
   // verrou du téléphone du patron (idée 96) : la caisse, le bilan et les réglages demandent son code
   if (ME.role === "patron" && ["caisse", "bilan", "salon", "clients"].includes(route) && pinLocked()) return pinScreen(route, arg);
@@ -218,8 +230,8 @@ function tabs(route) {
   nav.innerHTML = items.map(([h, l, d]) => `<a href="#${h}"${route === h || (h === "salon" && route === "offres") || (h === "clients" && route === "clients") ? ' aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span>${h === "salon" && low ? `<i class="badge">${low}</i>` : ""}</a>`).join("");
 }
 
-// Nouveautés affichées sur l'accueil (la plus récente en premier)
-const NOUVEAUTES = [
+// Nouveautés affichées sur l'accueil (la plus récente en premier) ; l'admin peut les remplacer dans ses réglages
+let NOUVEAUTES = [
   ["31 oct.", "Connexion par numéro de téléphone et code secret de 6 chiffres, sans SMS."],
   ["31 oct.", "Crédit client, liste noire, pause, verrou de la caisse, objectif du mois, fermetures et Ramadan, gérant, rapport de la semaine, photo avant / après."],
 ];
@@ -350,9 +362,10 @@ ROUTES.demarrer = async (mode) => {
 };
 const phoneError = (er) => /email-already-in-use/.test(er.code || "") ? "Ce compte existe déjà : appuie sur « Me connecter »." : /invalid-credential|wrong-password|user-not-found|invalid-login/.test(er.code || "") ? "Numéro ou code incorrect." : /too-many-requests/.test(er.code || "") ? "Trop d'essais. Attends quelques minutes." : "La connexion n'a pas abouti. Réessaie.";
 ROUTES.reprendre = (arg) => { ME.reprendre = String(arg || "").toUpperCase(); Object.assign(ME, { role: null, sid: null }); saveMe(); go("demarrer"); };
-const defaultServices = () => [
-  ["Dégradé", 1500, 25], ["Boule à zéro", 1000, 15], ["Barbe", 500, 10], ["Coupe et barbe", 2000, 35], ["Teinture", 2500, 40], ["Coupe enfant", 1000, 20],
-].map(([name, price, dur]) => ({ id: uid(), name, price, dur, photo: "" }));
+const DEFAULT_SVC = [["Dégradé", 1500, 25], ["Boule à zéro", 1000, 15], ["Barbe", 500, 10], ["Coupe et barbe", 2000, 35], ["Teinture", 2500, 40], ["Coupe enfant", 1000, 20]];
+// coupes par défaut : celles des réglages de l'admin ({ n, p, d }) ou la liste de base
+const regServices = () => (REG.services && REG.services.length) ? REG.services.map((x) => [x.n, x.p, x.d]) : DEFAULT_SVC;
+const defaultServices = () => regServices().map(([name, price, dur]) => ({ id: uid(), name, price, dur, photo: "" }));
 
 // ---------- Coiffeur : relier son téléphone au salon
 ROUTES.rejoindre = (arg) => {
@@ -973,6 +986,10 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.ser
   if (document.readyState === "loading") await new Promise((ok) => document.addEventListener("DOMContentLoaded", ok));
   net();
   try { await Store.init(); } catch (e) { toast("Connexion au serveur impossible : mode hors connexion."); }
+  // réglages de l'admin : on attend au plus 3 secondes (sinon les valeurs de config.js)
+  await Promise.race([Store.getTop("reglages", "app").then(applyReglages, () => {}), new Promise((ok) => setTimeout(ok, 3000))]);
   render();
+  // puis en direct : une annonce ou un prix changé par l'admin arrive sans rouvrir l'appli
+  try { Store.watchDoc("reglages", "app", (r) => { if (r) { applyReglages(r); annonceBar(); } }); } catch (e) {}
   noteDevice();
 })();

@@ -137,6 +137,7 @@ const Store = (() => {
   const setTop = (col, id, obj, merge) => settle(T(col).doc(id).set(obj, { merge: !!merge }));
   const updateTop = (col, id, patch) => settle(T(col).doc(id).update(patch));
   const removeTop = (col, id) => settle(T(col).doc(id).delete());
+  const watchDoc = (col, id, cb) => T(col).doc(id).onSnapshot((d) => cb(d.exists ? { id, ...d.data() } : null), () => {});
   async function getTop(col, id) { const d = await T(col).doc(id).get(); return d.exists ? { id, ...d.data() } : null; }
   function watchTop(col, cb, opt = {}) {
     let q = T(col);
@@ -207,6 +208,6 @@ const Store = (() => {
     createSalon, watchSalon, getSalon, updateSalon, mySalons, watchDirectory,
     watch, add, set, merge, update, remove, getDoc, nextNumber,
     staffCode, newStaffCode, joinStaff, watchAllSalons, activity, usage, logError, watchErrors, removeError,
-    addTop, addTopRef, setTop, updateTop, removeTop, getTop, watchTop, list, inscrire, unlinkStaff, claimSalon,
+    addTop, addTopRef, setTop, watchDoc, updateTop, removeTop, getTop, watchTop, list, inscrire, unlinkStaff, claimSalon,
   };
 })();

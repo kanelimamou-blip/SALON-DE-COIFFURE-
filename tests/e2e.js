@@ -19,8 +19,8 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
     await ctx.route('**/sw.js', (r) => r.fulfill({ status: 404, body: '' }));
     await ctx.route('**/config.js', async (r) => r.fulfill({ body: fs.readFileSync(__dirname + '/../docs/config.js', 'utf8').replace(/admins: \[[^\]]*\]/, `admins: ["${ADMIN.uid}"]`), contentType: 'text/javascript' }));
     const p = await ctx.newPage();
-    p.on('pageerror', (e) => { if (!/Erreur de test/.test(e.message)) errs.push(name + ': ' + e.message); });
-    p.on('console', (m) => { if (m.type() === 'error' && !/favicon|fonts|404/.test(m.text())) errs.push(name + ' console: ' + m.text()); });
+    p.on('pageerror', (e) => { if (process.env.DBG) console.log('PAGEERR', name, e.message); if (!/Erreur de test/.test(e.message)) errs.push(name + ': ' + e.message); });
+    p.on('console', (m) => { if (process.env.DBG && m.type() === 'error') console.log('CONSOLE', name, m.text()); if (m.type() === 'error' && !/favicon|fonts|404/.test(m.text())) errs.push(name + ' console: ' + m.text()); });
     return p;
   };
   const txt = async (p, sel) => (await p.textContent(sel)).replace(/\s+/g, ' ');
@@ -137,11 +137,18 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   check(adm.url().endsWith('#admin') && await adm.isHidden('#demo-bar') && (await txt(adm, '#ad-list')).includes('Démo'), 'présentation : fin, retour à l\'admin');
   // 11. L'admin ouvre le salon d'un client en vue patron : il voit tout, mais ne peut rien modifier
   await adm.click(`[data-sid="${sid}"] [data-demo]`); await W(adm, 3000);
-  check((await txt(adm, '#demo-bar')).includes('Vue de Salon Essai'), 'admin : vue patron du salon d\'un client');
+  check((await txt(adm, '#demo-bar')).includes('Salon Essai · tu peux tout modifier'), 'admin : vue patron du salon d\'un client');
   await adm.goto(U + '#bilan'); await W(adm, 3000);
   check((await txt(adm, 'main')).includes('1 500'), 'admin : voit le bilan réel du salon (1 500 F)');
-  const w = await adm.evaluate(async (sid) => { try { await firebase.firestore().collection('salons').doc(sid).update({ name: 'Piraté' }); return 'accepté'; } catch (e) { return e.code; } }, sid);
-  check(w === 'permission-denied', 'règles : l\'admin ne modifie pas le salon d\'un client (' + w + ')');
+  // l'admin peut tout modifier dans le salon d'un client (prix d'une coupe), et c'est noté dans le journal ; pas le propriétaire
+  await adm.goto(U + '#salon/d-svc'); await W(adm, 3000);
+  await adm.fill('#s-svc [data-sv]:first-child [data-f="price"]', '1600'); await adm.press('#s-svc [data-sv]:first-child [data-f="price"]', 'Tab'); await W(adm, 2500);
+  const pr = await adm.evaluate(async (sid) => (await firebase.firestore().collection('salons').doc(sid).get()).data().services[0].price, sid);
+  check(pr === 1600, 'admin : modifie le prix d\'une coupe dans le salon d\'un client');
+  const w = await adm.evaluate(async (sid) => { try { await firebase.firestore().collection('salons').doc(sid).update({ owner: 'quelquun' }); return 'accepté'; } catch (e) { return e.code; } }, sid);
+  check(w === 'permission-denied', 'règles : l\'admin ne change pas le propriétaire d\'un salon (' + w + ')');
+  const w2 = await cli2.evaluate(async () => { try { await firebase.firestore().collection('reglages').doc('app').set({ annonce: 'pirate' }); return 'accepté'; } catch (e) { return e.code; } });
+  check(w2 === 'permission-denied', 'règles : un patron ne touche pas aux réglages de l\'appli (' + w2 + ')');
   await adm.click('[data-dr="fin"]'); await W(adm, 2000);
   // 12. Le propriétaire connecté arrive tout seul sur l'espace admin, et le bouton admin reste en haut
   await adm.goto(U + '#accueil'); await W(adm, 2500);
@@ -238,6 +245,14 @@ let fails = 0; const check = (ok, label) => { console.log((ok ? 'OK   ' : 'ÉCHE
   check((await txt(as, '#ad-list')).includes('Salon Essai') && !(await as.isVisible('[data-ad="block"]')), 'associé : voit les salons, sans bouton Suspendre');
   const asBlock = await as.evaluate(async (sid) => { try { await firebase.firestore().collection('salons').doc(sid).update({ blocked: true }); return 'accepté'; } catch (e) { return e.code; } }, sid);
   check(asBlock === 'permission-denied', 'règles : l\'associé ne suspend pas (' + asBlock + ')');
+
+  // réglages de l'appli : annonce vue par les patrons
+  await adm.goto(U + '#admin'); await W(adm, 3000);
+  await adm.click('[data-tog="ad-p-reg"]'); await W(adm, 500); await adm.fill('#rg-an', 'Bienvenue dans la nouvelle version'); await adm.click('#rg-f .btn'); await W(adm, 2500);
+  await adm.click('[data-tab="journal"]'); await W(adm, 800);
+  check((await txt(adm, '#ad-t-journal')).includes('Modifié en vue patron'), 'admin : modification du salon d\'un client notée dans le journal');
+  await pat.goto(U + '#file'); await W(pat, 3000);
+  check((await txt(pat, '#annonce')).includes('nouvelle version'), 'patron : voit l\'annonce de l\'admin');
 
   // 16. Patron : crédit, liste noire, pause, fermeture, gérant, objectif, verrou, retrait d'un coiffeur
   await cli.goto(U + '#ticket/' + sid); await W(cli, 2500);

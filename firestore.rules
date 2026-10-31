@@ -24,6 +24,11 @@ service cloud.firestore {
       && (salon(sid).get('blockAt', 0) == 0 || request.time.toMillis() < salon(sid).get('blockAt', 0)); }
     function active(sid) { return open(sid); }
 
+    // l'admin lit et modifie tout le contenu de chaque salon (coupes, caisse, clients, rendez-vous…) depuis « Voir le salon »
+    match /salons/{sid}/{col}/{id} { allow read, write: if admin(); }
+    // réglages de l'appli (prix, essai, numéro, coupes par défaut, nouveautés, annonce) : lus par tous, modifiés par l'admin
+    match /reglages/{doc} { allow read: if true; allow write: if admin(); }
+
     match /salons/{sid} {
       // la fiche du salon est publique : nom, coupes, prix, ouvert ou fermé
       allow read: if true;
@@ -32,7 +37,8 @@ service cloud.firestore {
         && request.resource.data.created == request.time && !('blocked' in request.resource.data);
       // le patron ne touche ni à la date de création, ni à la suspension : c'est l'admin
       allow update: if (owner(sid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['owner', 'created', 'blocked', 'blockAt', 'claim']))
-        || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blocked', 'blockAt']))
+        // l'admin peut tout régler dans un salon (support, paramétrage), sauf changer son propriétaire ou sa date de création
+        || (admin() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['owner', 'created']))
         // transfert : le nouveau patron reprend le salon avec le code créé par l'admin
         || (signed() && request.auth.token.firebase.sign_in_provider != 'anonymous'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['owner', 'claim'])
