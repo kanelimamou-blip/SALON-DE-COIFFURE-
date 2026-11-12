@@ -23,6 +23,11 @@ service cloud.firestore {
     function open(sid) { return salon(sid).get('blocked', false) != true
       && (salon(sid).get('blockAt', 0) == 0 || request.time.toMillis() < salon(sid).get('blockAt', 0)); }
     function active(sid) { return open(sid); }
+    // jour « AAAA-MM-JJ » proche de l'heure du serveur (le Sénégal est à l'heure GMT) : empêche d'inventer un autre jour
+    function jourProche(day) {
+      let t = timestamp.date(int(day[0:4]), int(day[5:7]), int(day[8:10]));
+      return request.time > t - duration.value(14, 'h') && request.time < t + duration.value(38, 'h');
+    }
 
     // l'admin lit et modifie tout le contenu de chaque salon (coupes, caisse, clients, rendez-vous…) depuis « Voir le salon »
     match /salons/{sid}/{col}/{id} { allow read, write: if admin(); }
@@ -54,7 +59,19 @@ service cloud.firestore {
           && request.resource.data.code == get(/databases/$(db)/documents/salons/$(sid)/private/config).data.staffCode;
         allow delete: if owner(sid) || admin();
       }
-      match /meta/counter { allow read, write: if signed(); }
+      // compteur des tickets du jour : un client ne peut qu'avancer d'un numéro (ou repartir à 1 un nouveau jour),
+      // jamais remettre la file à zéro ni sauter des numéros ; l'équipe du salon peut le corriger
+      match /meta/counter {
+        allow read: if signed();
+        allow write: if team(sid) || (signed() && open(sid)
+          && request.resource.data.keys().hasOnly(['day', 'n'])
+          && request.resource.data.day is string && request.resource.data.day.matches('^20[0-9]{2}-[0-9]{2}-[0-9]{2}$')
+          && jourProche(request.resource.data.day)
+          && request.resource.data.n is int
+          && ((resource == null && request.resource.data.n == 1)
+            || (resource != null && request.resource.data.day == resource.data.day && request.resource.data.n == resource.data.n + 1)
+            || (resource != null && request.resource.data.day != resource.data.day && request.resource.data.n == 1)));
+      }
       match /queue/{id} {
         allow read: if true;
         allow create: if signed() && open(sid) && request.resource.data.uid == request.auth.uid
